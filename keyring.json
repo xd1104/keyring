@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "updatedAt": "2026-08-18T06:06:38.817Z",
+  "apps": [
+    {
+      "id": "travel-book",
+      "name": "旅途手帳",
+      "emoji": "🧳"
+    }
+  ],
+  "users": [
+    {
+      "id": "u-msy9avedde",
+      "name": "Benson",
+      "emoji": "🧔",
+      "theme": "ocean",
+      "kdf": {
+        "algo": "PBKDF2-SHA256",
+        "iter": 600000,
+        "salt": "9fR3mC6KTHCUrsZvT4savA=="
+      },
+      "apps": {
+        "travel-book": {
+          "iv": "s9usPUxdBvM3ED0a",
+          "cipher": "PZpYo2vgaIqpKr0pBZns9xNsgIeRNoBlHHeiWG33Z5e3xyg47QH5jc9mHycEB/reysIhM8Hs3/YbApYj4y0Pcj9MJw=="
+        }
+      }
+    },
+    {
+      "id": "u-msy9avisb8",
+      "name": "女友",
+      "emoji": "👩",
+      "theme": "sunset",
+      "kdf": {
+        "algo": "PBKDF2-SHA256",
+        "iter": 600000,
+        "salt": "HBnpQ2OX6gajYMl8TTsUfw=="
+      },
+      "apps": {
+        "travel-book": {
+          "iv": "uF40ufjipEPTyad8",
+          "cipher": "LTzjy3ZM8QgjCrUaA4olrZW9lRNCttiRmXidC66OROnhyXyezurcP13sZSRgVBC/Q7a5Y+jZzK/NxTbzvy1xJ0grqw=="
+        }
+      }
+    }
+  ]
+}

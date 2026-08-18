@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# ⚠️ 明文金鑰與每個人的加密金鑰只存這台電腦，永遠不進 repo
+secrets.json
+*.tmp~*

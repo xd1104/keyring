@@ -1,0 +1,9 @@
+# 這個 repo 的檔案跨裝置同步，換行一律 LF（避免 Windows 端 checkout 成 CRLF 造成整檔 diff）
+* text=auto eol=lf
+*.json text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+*.md   text eol=lf
+# 批次檔一定要 CRLF，否則 cmd.exe 會亂
+*.bat  text eol=crlf

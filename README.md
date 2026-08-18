@@ -1,0 +1,108 @@
+# 🔑 鑰匙圈（keyring）
+
+一人一組密碼，任何裝置輸一次就能編輯我做的那些 GitHub Pages App（旅途手帳、食譜本…）。
+不用再把一長串 GitHub PAT 貼來貼去。
+
+## 為什麼這樣做
+
+Pages 是純靜態、**沒有伺服器可以驗密碼**。所以：
+
+1. 後台（這個工具，只跑在 Benson 的電腦）把每個 App 的 PAT **用每個人的密碼各加密一份**。
+2. 密文寫進 `keyring.json`，自動 push 到這個公開 repo。
+3. App 前端抓 `keyring.json`，使用者選自己、輸密碼，**在瀏覽器裡**用 WebCrypto 解開，
+   把解出來的金鑰寫進那個 App 原本就在用的 localStorage key。
+
+密碼錯的唯一症狀就是「解不開」（AES-GCM 驗證失敗），所以檔案裡**不需要、也沒有**密碼或密碼 hash。
+
+## 兩個檔案（別搞混）
+
+| 檔案 | 內容 | 會不會上傳 |
+|---|---|---|
+| `secrets.json` | **明文 PAT** ＋ 每個人的派生金鑰 | ❌ 在 `.gitignore` 裡，永遠只在這台電腦 |
+| `keyring.json` | 只有 salt／iv／密文 | ✅ 這就是要發布的東西 |
+
+刻意存「派生金鑰」而不是密碼：後台真的看不到任何人的密碼，但又能在「多給某人一個 App」時
+直接用他的金鑰加密新條目，不必再問他一次密碼。**換密碼＝重新派生金鑰＋把所有 PAT 重加密。**
+
+## 第一次：怎麼把 repo 接起來
+
+剛裝好的時候，這個資料夾**還沒跟 GitHub 接上**，所以後台最上面會是琥珀色的
+「存好了，但還沒送到 GitHub」。**這是正常的，你存的東西都在這台電腦上，不會不見**，
+只是別的裝置還拿不到。接起來只要兩步：
+
+1. 到 github.com 開一個新的 repo，名字叫 **`keyring`**，選 **Public**
+   （不用勾 README、不用選 .gitignore——這邊都已經有了）。
+2. 回到後台，按琥珀色那條裡的 **「🔗 幫我接起來」**。
+   它會在這個資料夾 `git init`、把 `origin` 指到 `https://github.com/xd1104/keyring.git`，然後送出去。
+
+成功之後那條會變成綠色的「✓ 存檔就自動發布了」，以後每次存檔都會自動 push，不用再管它。
+
+會遇到的另外兩種狀況，後台都會直接寫在畫面上：
+- **GitHub 說找不到 repo** → repo 還沒開好，或名字/帳號打錯了。
+- **GitHub 不讓這台電腦寫入** → 登入資訊過期。在一般的命令提示字元跑一次 `git push origin HEAD`
+  照指示登入（或用 GitHub Desktop 登入 xd1104），再回來按「再試一次」。
+
+> 不管哪一種失敗，`secrets.json` 與 `keyring.json` 都**已經寫進硬碟了**；發布只是「送出去」這一步沒成功。
+
+## 怎麼開
+
+雙擊 `start.bat`，或用 tool-manager 面板 →「AI 工具」→ 鑰匙圈。網址 <http://localhost:4620>。
+
+- 存檔就自動發布（git commit + push），沒有草稿狀態、沒有發布按鈕。
+- 發布失敗（沒網路、repo 沒開）只會在上面那條顯示原因，**本機一定已經存好了**。
+- 安全閘門：`secrets.json` 若不在 `.gitignore` 裡，整個發布會直接中止。
+
+## 資料格式（`keyring.json`）
+
+```jsonc
+{
+  "version": 1,
+  "updatedAt": "ISO",
+  "apps": [{ "id": "travel-book", "name": "旅途手帳", "emoji": "🧳" }],
+  "users": [{
+    "id": "<slug>", "name": "Benson", "emoji": "🧔", "theme": "sunset",
+    "kdf": { "algo": "PBKDF2-SHA256", "iter": 600000, "salt": "<base64>" },
+    "apps": { "travel-book": { "iv": "<base64>", "cipher": "<base64>" } }
+  }]
+}
+```
+
+- 一個人一個 salt（一組密碼派生一把金鑰，用來加密他所有 App 的 PAT）；每個 App 條目各自的 iv。
+- **`id` 一律是 ASCII**（使用者 `u-<ts36>`、App 用 Benson 填的代號），顯示用的原文放 `name`。
+  中文／日韓文當 id 會在不同系統之間被正規化成不同字串而分裂成兩筆——travel-book 吃過這個虧。
+- `cipher` ＝ AES-GCM 密文 ‖ 16 bytes authTag（WebCrypto 的格式，Node 端要自己接上去）。
+- 刻意用 JSON 不用 md：這是機器讀寫的檔，沒有人要手改，也就不必像 travel-book 那樣維護兩套 parser。
+
+## 別的 App 要導入（三步）
+
+1. 把 `client/keyring-unlock.js` 複製到那個 App 的前端資料夾（自帶樣式、零依賴、單一檔）。
+2. `index.html` 在自己的 app.js **之前**載入它；PWA 的話把它加進 service worker 的 shell 快取清單。
+3. 決定資料層之後呼叫一次：
+
+```js
+Keyring.init({
+  appId: "recipe-book",            // 要跟後台登記的「代號」一模一樣
+  tokenKey: "recipe_gh_pat",       // 這個 App 原本存金鑰的 localStorage key（不用改）
+  enabled: !STORE.local,           // 本機版不需要鑰匙
+  toast: myToast,                  // 借用 App 自己的 toast
+  onChange: function(){ reloadData(); }
+});
+```
+
+然後：footer 放 `Keyring.chipHtml()`；寫入守門處改成 `Keyring.open("動作名")`；
+首頁畫完呼叫一次 `Keyring.maybeIntro()`（第一次進站主動端一次解鎖，之後永遠不再自動彈）。
+
+視覺會吃該 App 的 CSS 變數（`--acc`／`--ink`／`--line`…），沒有就用內建的暖色系預設值。
+
+### 這個模組還做了什麼
+
+- **換金鑰不用重解鎖**：裝置記著的是派生金鑰，每次載入會用它把最新的密文解開，PAT 換新就自動換過去。
+- **換密碼／被刪／被收回權限 → 靜默降級**：解不開就清掉本機記憶、回到「只看看」，並提示一次。
+- **沒勾「記住這台裝置」**：身分與金鑰只進 `sessionStorage`，關掉分頁就沒了（別人的電腦用）。
+- **離線**：抓不到 `keyring.json` 就維持現狀，不會把人踢回唯讀。
+- 救援用：`localStorage["keyring.<appId>.src"]` 可以指到別份鑰匙圈（例如本機後台的 `http://localhost:4620/keyring.json`）。
+
+## 金鑰分開是刻意的
+
+每個 App 一把 fine-grained PAT、**只授權它自己那一個 repo** 的 Contents。
+不要為了省事發一把「全部 repo 都能寫」的金鑰——那條界線不能打破。

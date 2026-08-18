@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2b2620">
+<title>鑰匙圈 · UX Demo</title>
+<style>
+:root{
+  --bg:#f7f4ee; --card:#ffffff; --ink:#2b2620; --muted:#8f8578; --line:#e8e1d5;
+  --acc:#ff6b5e; --acc-deep:#e2503f; --ok:#2fa87a; --bad:#d64545;
+  --warn:#8a5b12; --warn-bg:#fff6e3; --warn-line:#f2dcae;
+  --shadow:0 2px 14px rgba(70,55,30,.08);
+  --bar:52px;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  background:#e9e4da;
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  color:var(--ink);
+}
+button{font-family:inherit; border:none; background:none; cursor:pointer; color:inherit; padding:0;}
+h1,h2,h3,p,ul{margin:0;}
+ul{padding:0; list-style:none;}
+
+/* ================= demo 切換列（正式版沒有這條） ================= */
+#demobar{position:fixed; top:0; left:0; right:0; z-index:90; background:#2b2620; color:#fff;
+  min-height:var(--bar); display:flex; align-items:center; gap:6px; padding:0 8px;}
+#demobar .dtab{min-height:44px; padding:0 12px; border-radius:99px; font-size:13.5px; font-weight:700;
+  color:#cfc8bd; display:flex; align-items:center; gap:5px; white-space:nowrap;}
+#demobar .dtab.on{background:#fff; color:#2b2620;}
+#demobar .spacer{flex:1;}
+#demobar .dnote{font-size:11.5px; color:#a89e8f; white-space:nowrap;}
+#demobar .dreset{min-height:44px; padding:0 11px; border-radius:99px; font-size:12.5px; font-weight:700;
+  color:#cfc8bd; border:1px solid #4d453b;}
+@media(max-width:620px){ #demobar .dnote{display:none;} }
+
+#stage{padding-top:var(--bar);}
+
+/* ================= 手機：旅途手帳外框 ================= */
+#app{max-width:480px; margin:0 auto; min-height:calc(100dvh - var(--bar)); background:var(--bg); position:relative;}
+.home-head{padding:30px 20px 12px;}
+.home-eyebrow{font-size:12px; letter-spacing:.22em; color:var(--muted); font-weight:700;}
+.home-head h1{font-size:30px; font-weight:800; margin-top:6px;}
+.home-head p{color:var(--muted); margin-top:6px; font-size:15px;}
+.home-list{padding:8px 16px 4px; display:flex; flex-direction:column; gap:16px;}
+.trip-card{background:var(--card); border-radius:20px; overflow:hidden; box-shadow:var(--shadow); text-align:left; width:100%;}
+.cover{min-height:110px; padding:18px; display:flex; align-items:flex-end; gap:12px; color:#fff;}
+.cover-emoji{font-size:44px; line-height:1; filter:drop-shadow(0 2px 6px rgba(0,0,0,.25));}
+.cover-txt h2{font-size:22px; font-weight:800; text-shadow:0 1px 8px rgba(0,0,0,.28);}
+.cover-txt div{font-size:13px; opacity:.95; margin-top:2px; text-shadow:0 1px 6px rgba(0,0,0,.3);}
+.trip-meta{padding:13px 18px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13.5px; color:var(--muted);}
+.count-chip{background:#fff1ef; color:var(--acc-deep); font-weight:700; font-size:12.5px; padding:5px 10px; border-radius:99px; white-space:nowrap;}
+.count-chip.now{background:#e8f6ef; color:var(--ok);}
+.add-trip{border:2px dashed #d8cfbf; border-radius:20px; min-height:64px; color:var(--muted);
+  font-size:16px; font-weight:600; width:100%; display:flex; align-items:center; justify-content:center; gap:8px; background:transparent;}
+
+/* footer：身分列（本次設計新增） */
+.home-foot{text-align:center; color:#b3a996; font-size:12.5px; padding:26px 16px 40px;}
+.who-chip{display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px; border-radius:99px;
+  font-size:13.5px; font-weight:700; background:#fff1ef; color:var(--acc-deep); border:1px solid #ffd9d3;}
+.who-chip.on{background:#f3eee4; color:#6b6154; border-color:#e8e1d5;}
+.who-dot{width:24px; height:24px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+  font-size:14px; color:#fff; flex:0 0 auto;}
+.foot-links{margin-top:14px; display:flex; align-items:center; justify-content:center; gap:4px; flex-wrap:wrap;}
+.foot-links button{color:#a4988a; text-decoration:underline; font-size:12.5px; min-height:44px; padding:0 8px;}
+.foot-links .ver-btn{font-variant-numeric:tabular-nums;}
+
+/* ================= 共用：sheet / dialog ================= */
+#sheet-layer{position:fixed; inset:0; z-index:80;}
+.backdrop{position:absolute; inset:0; background:rgba(30,22,14,.45); animation:fadeIn .2s;}
+.sheet{position:absolute; bottom:0; left:0; right:0; margin:0 auto; max-width:480px;
+  background:#fff; border-radius:22px 22px 0 0; padding:14px 18px calc(22px + env(safe-area-inset-bottom));
+  max-height:90dvh; overflow-y:auto; animation:slideUp .26s cubic-bezier(.2,.8,.3,1);}
+.dialog{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:min(520px, calc(100vw - 32px));
+  background:#fff; border-radius:20px; padding:18px 20px 20px; max-height:88dvh; overflow-y:auto;
+  box-shadow:0 20px 60px rgba(40,30,15,.3); animation:popIn .2s ease;}
+@keyframes slideUp{from{transform:translateY(60%); opacity:.4;} to{transform:none; opacity:1;}}
+@keyframes fadeIn{from{opacity:0;} to{opacity:1;}}
+@keyframes popIn{from{transform:translate(-50%,-46%); opacity:0;} to{transform:translate(-50%,-50%); opacity:1;}}
+.grab{width:38px; height:4px; border-radius:99px; background:#e4ddcf; margin:0 auto 10px;}
+.sheet-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:8px;}
+.sheet-head h3{font-size:19px; font-weight:800; overflow-wrap:anywhere;}
+.sheet-head button{min-width:44px; min-height:44px; font-size:18px; color:var(--muted);
+  display:flex; align-items:center; justify-content:center; flex:0 0 auto;}
+
+/* 表單元件（全站共用；input 一律 16px） */
+.field{display:block; margin-bottom:13px;}
+.field .fl{display:block; font-size:13px; font-weight:700; color:var(--muted); margin-bottom:6px;}
+.field input,.field select,.field textarea{
+  width:100%; font-size:16px; font-family:inherit; color:var(--ink);
+  padding:13px 13px; border:1.5px solid var(--line); border-radius:13px; background:#fbfaf6;
+  appearance:none; -webkit-appearance:none;}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none; border-color:var(--acc);}
+.hint{font-size:12.5px; color:var(--muted); margin:-4px 2px 13px; line-height:1.55;}
+.btn-primary{width:100%; min-height:52px; border-radius:15px; background:var(--acc); color:#fff;
+  font-size:17px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:4px;}
+.btn-primary:active{background:var(--acc-deep);}
+.btn-primary[disabled]{opacity:.72;}
+.btn-ghost{width:100%; min-height:52px; border-radius:15px; border:1.5px solid var(--line); background:#fbfaf6;
+  color:var(--ink); font-size:16px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;}
+.btn-danger{width:100%; min-height:52px; border-radius:15px; background:#fbeeee; color:var(--bad);
+  font-size:16px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;}
+.check-row{display:flex; align-items:center; gap:10px; min-height:48px; cursor:pointer; position:relative;}
+.check-row input{position:absolute; opacity:0; width:1px; height:1px;}
+.ck-box{width:26px; height:26px; border-radius:8px; border:2px solid #d6cbb8; background:#fbfaf6; flex:0 0 auto;
+  display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px;}
+.check-row input:checked + .ck-box{background:var(--acc); border-color:var(--acc);}
+.check-row input:checked + .ck-box::after{content:"✓";}
+.ck-lb{font-size:15.5px; font-weight:600;}
+.ck-lb small{display:block; font-size:12.5px; color:var(--muted); font-weight:500; margin-top:2px;}
+
+/* 密碼欄（含顯示切換） */
+.pw-wrap{position:relative;}
+.pw-wrap input{padding-right:56px; letter-spacing:.02em;}
+.pw-eye{position:absolute; right:4px; top:50%; transform:translateY(-50%);
+  width:48px; height:48px; display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--muted);}
+.pw-meter{font-size:12.5px; color:var(--muted); margin:6px 2px 0; min-height:18px;}
+.pw-meter.weak{color:#a9884a;}
+
+/* ================= 解鎖 sheet ================= */
+.unlock-why{background:#fff1ef; color:var(--acc-deep); font-size:13.5px; font-weight:600;
+  border-radius:13px; padding:11px 13px; margin-bottom:14px; line-height:1.5;}
+.u-sub{color:var(--muted); font-size:14px; margin:-4px 0 14px; line-height:1.55;}
+.u-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+.u-tile{border-radius:18px; min-height:116px; padding:14px; color:#fff; text-align:left;
+  display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(70,55,30,.14);}
+.u-tile:active{transform:scale(.97);}
+.u-tile .em{font-size:34px; line-height:1; filter:drop-shadow(0 2px 6px rgba(0,0,0,.25));}
+.u-tile .nm{font-size:17px; font-weight:800; text-shadow:0 1px 8px rgba(0,0,0,.28);}
+.u-peek{margin-top:20px; padding-top:16px; border-top:1px solid #f2ecdf; text-align:center;}
+.u-peek p{font-size:13px; color:var(--muted); line-height:1.6;}
+.peek-link{min-height:44px; padding:0 14px; margin-top:2px; font-size:15px; font-weight:700;
+  color:#6b6154; text-decoration:underline;}
+.pw-back{min-height:44px; padding:0 10px 0 0; font-size:14.5px; font-weight:700; color:var(--muted);}
+.pw-face{width:74px; height:74px; border-radius:22px; margin:2px auto 12px; display:flex; align-items:center;
+  justify-content:center; font-size:36px; color:#fff; box-shadow:0 6px 18px rgba(70,55,30,.18);}
+.pw-title{text-align:center; font-size:21px; font-weight:800;}
+.pw-say{text-align:center; font-size:13.5px; color:var(--muted); margin:6px 0 16px; line-height:1.55;}
+.pw-err{background:#fbeeee; color:var(--bad); font-size:13.5px; font-weight:700; border-radius:12px;
+  padding:10px 12px; margin:10px 0 2px; line-height:1.5;}
+.pw-err span{display:block; font-weight:500; color:#a4655f; font-size:12.5px; margin-top:4px;}
+.spin{width:17px; height:17px; border-radius:50%; border:2.5px solid rgba(255,255,255,.45);
+  border-top-color:#fff; animation:sp .7s linear infinite;}
+@keyframes sp{to{transform:rotate(360deg);}}
+.id-row{display:flex; align-items:center; gap:12px; padding:4px 0 16px;}
+.id-face{width:56px; height:56px; border-radius:18px; display:flex; align-items:center; justify-content:center;
+  font-size:28px; color:#fff; flex:0 0 auto;}
+.id-bd b{display:block; font-size:18px;}
+.id-bd span{display:block; font-size:13px; color:var(--muted); margin-top:3px;}
+.warnbox{background:var(--warn-bg); border:1px solid var(--warn-line); border-radius:14px;
+  padding:12px 14px; font-size:13.5px; color:var(--warn); line-height:1.6; margin-bottom:12px;}
+
+/* ================= 後台 ================= */
+#admin{max-width:980px; margin:0 auto; padding:0 16px 80px; min-height:calc(100dvh - var(--bar)); background:var(--bg);}
+@media(min-width:1013px){ #admin{border-left:1px solid var(--line); border-right:1px solid var(--line);} }
+.ad-head{padding:26px 4px 14px; display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+.ad-head h1{font-size:26px; font-weight:800;}
+.ad-head p{font-size:13.5px; color:var(--muted); margin-top:5px;}
+.pub-bar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; border-radius:16px; padding:14px 16px;
+  background:#e8f6ef; border:1px solid #cfe9dd; margin-bottom:16px;}
+.pub-bar.dirty{background:var(--warn-bg); border-color:var(--warn-line);}
+.pub-txt{flex:1; min-width:200px; font-size:14px; line-height:1.5;}
+.pub-txt b{display:block; font-size:15px; font-weight:800;}
+.pub-bar .pub-txt b{color:var(--ok);}
+.pub-bar.dirty .pub-txt b{color:var(--warn);}
+.pub-txt span{color:var(--muted); font-size:12.5px;}
+.pub-btn{min-height:48px; padding:0 22px; border-radius:14px; font-size:15.5px; font-weight:800;
+  background:#dfe9e4; color:#5d8877; flex:0 0 auto;}
+.pub-bar.dirty .pub-btn{background:var(--acc); color:#fff; box-shadow:0 4px 14px rgba(226,80,63,.28);}
+.pub-list{width:100%; border-top:1px dashed var(--warn-line); padding-top:10px; margin-top:2px;}
+.pub-list li{font-size:13px; color:var(--warn); padding:3px 0;}
+/* 命中區撐到 44px，但用負 margin 讓視覺仍貼在那行小字裡 */
+.pub-more{display:inline-flex; align-items:center; min-height:44px; margin:-14px 0; padding:0 6px;
+  font-size:12.5px; font-weight:700; color:var(--warn); text-decoration:underline;}
+.ad-tabs{display:flex; background:#ece5d6; border-radius:14px; padding:3px; margin-bottom:18px; max-width:420px;}
+.ad-tabs button{flex:1; min-height:44px; border-radius:11px; font-size:14.5px; font-weight:700; color:var(--muted);}
+.ad-tabs button.on{background:#fff; color:var(--ink); box-shadow:0 1px 4px rgba(0,0,0,.08);}
+.sec-title{font-size:14px; font-weight:800; color:var(--muted); margin:4px 4px 10px;}
+.rowcard{background:var(--card); border-radius:18px; box-shadow:var(--shadow); padding:14px 16px;
+  display:flex; align-items:center; gap:14px; margin-bottom:12px; flex-wrap:wrap;}
+.rc-face{width:52px; height:52px; border-radius:17px; display:flex; align-items:center; justify-content:center;
+  font-size:26px; color:#fff; flex:0 0 auto;}
+.rc-bd{flex:1; min-width:180px;}
+.rc-bd b{font-size:17px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+.rc-bd .chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:7px;}
+.chip{background:#f3eee4; color:#6b6154; font-size:12px; font-weight:700; padding:4px 10px; border-radius:99px;}
+.chip.none{background:#faf4ec; color:#b3a996; font-weight:600;}
+.dot-new{background:#ffe8b8; color:var(--warn); font-size:11.5px; font-weight:800; padding:3px 9px; border-radius:99px;}
+.rc-acts{display:flex; gap:8px; flex-wrap:wrap; flex:0 0 auto;}
+.rc-acts button{min-height:44px; padding:0 14px; border-radius:12px; background:#f3eee4; font-size:14px;
+  font-weight:700; color:#6b6154;}
+.rc-acts button.danger{color:var(--bad); background:#fbeeee;}
+.keyline{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; color:#6b6154;
+  background:#faf6ee; border-radius:10px; padding:7px 10px; margin-top:8px; display:inline-block; overflow-wrap:anywhere;}
+.addcard{border:2px dashed #d8cfbf; border-radius:18px; min-height:64px; color:var(--muted); font-size:16px;
+  font-weight:700; width:100%; display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:22px;}
+.pickrow{display:flex; gap:8px; flex-wrap:wrap;}
+.pick{position:relative;}
+.pick input{position:absolute; opacity:0; width:100%; height:100%; left:0; top:0;}
+.pick span{width:48px; height:48px; border-radius:14px; border:2px solid var(--line); display:flex;
+  align-items:center; justify-content:center; font-size:23px; background:#fbfaf6;}
+.pick input:checked + span{border-color:var(--acc); background:#fff1ef;}
+.pick .swatch{font-size:0; border-color:transparent;}
+.pick input:checked + .swatch{border-color:#fff; box-shadow:0 0 0 2.5px var(--acc), 0 2px 8px rgba(226,80,63,.35);}
+.pick input:checked + .swatch::after{content:"✓"; font-size:19px; font-weight:800; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,.45);}
+.applist{display:flex; flex-direction:column; gap:8px;}
+.appcheck{display:flex; align-items:center; gap:12px; min-height:60px; padding:8px 14px; border-radius:14px;
+  border:1.5px solid var(--line); background:#fbfaf6; cursor:pointer; position:relative;}
+.appcheck input{position:absolute; opacity:0; width:1px; height:1px;}
+.appcheck .em{font-size:22px;}
+.appcheck .nm{flex:1; font-size:15.5px; font-weight:700;}
+.appcheck .nm small{display:block; font-size:12.5px; color:var(--muted); font-weight:500; margin-top:2px;}
+.appcheck input:checked ~ .ck-box{background:var(--acc); border-color:var(--acc);}
+.appcheck input:checked ~ .ck-box::after{content:"✓";}
+.okbox{background:#e8f6ef; border:1px solid #cfe9dd; border-radius:14px; padding:14px 15px; margin-bottom:14px;}
+.okbox b{display:block; font-size:15px; color:#1f7d5b;}
+.okbox p{font-size:13px; color:#4a7d68; margin-top:5px; line-height:1.6;}
+.saytext{background:#faf6ee; border:1px solid var(--line); border-radius:13px; padding:12px 14px;
+  font-size:14px; line-height:1.75; white-space:pre-wrap; overflow-wrap:anywhere; margin-bottom:12px;}
+.ad-foot{text-align:center; color:#b3a996; font-size:12.5px; padding:24px 10px 10px; line-height:1.7;}
+
+/* toast */
+#toast{position:fixed; left:50%; transform:translateX(-50%); bottom:34px; z-index:95;
+  background:rgba(43,38,32,.94); color:#fff; font-size:14px; font-weight:600;
+  padding:12px 18px; border-radius:99px; box-shadow:0 6px 18px rgba(0,0,0,.25);
+  max-width:88vw; text-align:center; transition:opacity .25s; pointer-events:none; line-height:1.5;}
+#toast.hidden{opacity:0;}
+#toast.err{background:rgba(180,52,52,.96);}
+#toast.ok{background:rgba(38,132,96,.96);}
+</style>
+</head>
+<body>
+
+<div id="demobar">
+  <button class="dtab on" id="tab-phone" onclick="go('phone')">📱 解鎖畫面</button>
+  <button class="dtab" id="tab-admin" onclick="go('admin')">🖥️ 後台</button>
+  <span class="spacer"></span>
+  <span class="dnote">試玩密碼：Benson＝1234 ／ 女友＝abcd</span>
+  <button class="dreset" onclick="resetDemo()">重置 demo</button>
+</div>
+
+<div id="stage"></div>
+<div id="sheet-layer" hidden></div>
+<div id="toast" class="hidden"></div>
+
+<script>
+/* =========================================================
+   鑰匙圈 UX Demo — 單檔、零依賴、假資料
+   這是「試方向用」的原型，沒有真的加解密、沒有真的發布。
+   ========================================================= */
+
+var THEMES = {
+  sunset:"linear-gradient(135deg,#ff8a80,#ff5f7e 55%,#c94b9d)",
+  ocean: "linear-gradient(135deg,#38c3a7,#2f8fd6)",
+  night: "linear-gradient(135deg,#6a7bf0,#8e54c9)",
+  forest:"linear-gradient(135deg,#7ec96f,#3f9d8a)",
+  sand:  "linear-gradient(135deg,#f5c65d,#f0855c)"
+};
+var THEME_KEYS = Object.keys(THEMES);
+var EMOJIS = ["🧔","👩","🧑","👧","👦","🐱","🐶","🦊","🐻","🌻","⭐","🍀"];
+
+function freshData(){
+  return {
+    users:[
+      {id:"u1", name:"Benson", emoji:"🧔", theme:"ocean",  pw:"1234", apps:["travel","recipe"]},
+      {id:"u2", name:"女友",   emoji:"👩", theme:"sunset", pw:"abcd", apps:["travel"]}
+    ],
+    apps:[
+      {id:"travel", name:"旅途手帳", emoji:"🧳", url:"https://xd1104.github.io/travel-book/",
+       key:"github_pat_11ABZK7QY0aaaaaaaaaaaa9f3f"},
+      {id:"recipe", name:"食譜本",   emoji:"🍳", url:"https://xd1104.github.io/benson-receipe/",
+       key:"github_pat_11ABZK7QY0bbbbbbbbbbbb2c7d"}
+    ],
+    pending:[],
+    lastPublish:"8/16 21:40"
+  };
+}
+
+var D = freshData();
+/* 這台裝置的狀態：locked=沒解鎖(只看看) / unlocked=記住了某人 */
+var device = { mode:"locked", userId:null, autoShown:false };
+var view = "phone";
+var adTab = "users";
+var pubOpen = false;
+
+/* ---------- 小工具 ---------- */
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+function uid(){ return "x"+Math.random().toString(36).slice(2,8); }
+function userById(id){ for(var i=0;i<D.users.length;i++) if(D.users[i].id===id) return D.users[i]; return null; }
+function appById(id){ for(var i=0;i<D.apps.length;i++) if(D.apps[i].id===id) return D.apps[i]; return null; }
+function grad(t){ return THEMES[t]||THEMES.sunset; }
+var toastTimer=null;
+function toast(msg, kind){
+  var el=$("toast"); el.textContent=msg; el.className=kind||"";
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(function(){ el.className=(kind||"")+" hidden"; }, 2600);
+}
+
+/* ---------- 分頁 ---------- */
+function go(v){
+  view=v; closeSheet();
+  $("tab-phone").className = "dtab"+(v==="phone"?" on":"");
+  $("tab-admin").className = "dtab"+(v==="admin"?" on":"");
+  render();
+  window.scrollTo(0,0);
+}
+function resetDemo(){
+  D=freshData(); device={mode:"locked", userId:null, autoShown:false};
+  adTab="users"; pubOpen=false; closeSheet(); go("phone");
+  toast("已重置：回到「這台裝置沒解鎖過」的樣子");
+  maybeAutoUnlock();
+}
+/* 這台裝置第一次打開：主動把解鎖端出來一次（可以直接關掉／選只看看），之後不再自動彈 */
+function maybeAutoUnlock(){
+  if(view!=="phone" || device.mode!=="locked" || device.autoShown) return;
+  device.autoShown=true;
+  setTimeout(function(){ if(view==="phone" && device.mode==="locked") openUnlock(""); }, 900);
+}
+function render(){
+  $("stage").innerHTML = (view==="phone") ? viewPhone() : viewAdmin();
+}
+
+/* =========================================================
+   A. 手機：旅途手帳裡的解鎖體驗
+   ========================================================= */
+function tripCard(theme, emoji, name, dest, meta, chip, chipCls){
+  return '<button class="trip-card" onclick="tapTrip()">'
+    + '<div class="cover" style="background:'+grad(theme)+'">'
+    +   '<span class="cover-emoji">'+emoji+'</span>'
+    +   '<div class="cover-txt"><h2>'+name+'</h2><div>'+dest+'</div></div>'
+    + '</div>'
+    + '<div class="trip-meta"><span>'+meta+'</span><span class="count-chip '+chipCls+'">'+chip+'</span></div>'
+    + '</button>';
+}
+function footBar(){
+  var chip;
+  if(device.mode==="unlocked"){
+    var u=userById(device.userId);
+    chip = '<button class="who-chip on" onclick="openIdentity()">'
+      + '<span class="who-dot" style="background:'+grad(u.theme)+'">'+u.emoji+'</span>'
+      + esc(u.name)+'・可以編輯</button>';
+  }else{
+    chip = '<button class="who-chip" onclick="openUnlock(\'\')">🔒 只看看模式・點我解鎖</button>';
+  }
+  return '<footer class="home-foot">'+chip
+    + '<div class="foot-links">'
+    +   '<button onclick="toast(\'（demo）這裡是原本的設定\')">設定</button>'
+    +   '<button onclick="toast(\'重新整理好了\')">重新整理</button>'
+    +   '<button class="ver-btn" onclick="toast(\'（demo）版本資訊\')">v1.9.2</button>'
+    + '</div></footer>';
+}
+function viewPhone(){
+  return '<div id="app">'
+    + '<div class="home-head"><div class="home-eyebrow">TRAVEL BOOK</div>'
+    +   '<h1>旅途手帳</h1><p>兩個人的行程，一起寫。</p></div>'
+    + '<div class="home-list">'
+    +   tripCard("sunset","🏝️","沖繩五天四夜","日本・沖繩","9/12 出發・5 天","還有 25 天","")
+    +   tripCard("ocean","⛩️","京都賞楓","日本・京都","11/20 出發・4 天","還有 94 天","")
+    +   '<button class="add-trip" onclick="tryWrite(\'規劃新旅程\')">＋ 規劃新旅程</button>'
+    + '</div>'
+    + footBar()
+    + '</div>';
+}
+function tapTrip(){
+  toast("（demo）這裡會進旅程頁，重點在下面那條身分列");
+}
+/* 唯讀守門：不是丟個 toast 就算了，直接把解鎖端到他面前 */
+function tryWrite(what){
+  if(device.mode==="unlocked"){ toast("（demo）這裡會打開「"+what+"」的表單", "ok"); return; }
+  openUnlock(what);
+}
+
+/* ---------- 解鎖 sheet ---------- */
+var uiUnlock = { step:"who", userId:null, reason:"", tries:0, busy:false, show:false, remember:true };
+
+function openUnlock(reason){
+  uiUnlock = { step:"who", userId:null, reason:reason||"", tries:0, busy:false, show:false, remember:true };
+  if(D.users.length===1){ uiUnlock.step="pw"; uiUnlock.userId=D.users[0].id; }
+  drawUnlock();
+}
+function drawUnlock(){
+  openSheet(uiUnlock.step==="who" ? sheetWho() : sheetPw(), uiUnlock.step==="pw" ? "pw-input" : null);
+}
+function sheetWho(){
+  var tiles = D.users.map(function(u){
+    return '<button class="u-tile" style="background:'+grad(u.theme)+'" onclick="pickUser(\''+u.id+'\')">'
+      + '<span class="em">'+u.emoji+'</span><span class="nm">'+esc(u.name)+'</span></button>';
+  }).join("");
+  return '<div class="grab"></div>'
+    + '<div class="sheet-head"><h3>誰在用？</h3>'
+    +   '<button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + (uiUnlock.reason ? '<div class="unlock-why">要「'+esc(uiUnlock.reason)+'」得先解鎖，選一下你是誰就好。</div>' : '')
+    + '<p class="u-sub">選你自己，輸入密碼，這台裝置就記住了。</p>'
+    + '<div class="u-grid">'+tiles+'</div>'
+    + '<div class="u-peek"><p>不用密碼也能看，只是不能改東西。</p>'
+    +   '<button class="peek-link" onclick="peek()">先看看就好 →</button></div>';
+}
+function pickUser(id){ uiUnlock.step="pw"; uiUnlock.userId=id; uiUnlock.tries=0; drawUnlock(); }
+function backToWho(){ uiUnlock.step="who"; uiUnlock.userId=null; drawUnlock(); }
+function peek(){ closeSheet(); toast("好，就先看看。想編輯再點最下面那條"); }
+
+function sheetPw(){
+  var u=userById(uiUnlock.userId);
+  var multi = D.users.length>1;
+  var err="";
+  if(uiUnlock.tries>0){
+    err = '<div class="pw-err">密碼不對，再試一次'
+      + (uiUnlock.tries>=2 ? '<span>想不起來的話跟 Benson 說一聲，他那邊可以幫你換一組新的。</span>' : '')
+      + '</div>';
+  }
+  return '<div class="grab"></div>'
+    + '<div class="sheet-head">'
+    +   (multi ? '<button class="pw-back" onclick="backToWho()">‹ 換一個人</button>' : '<span></span>')
+    +   '<button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + (uiUnlock.reason ? '<div class="unlock-why">要「'+esc(uiUnlock.reason)+'」得先解鎖。</div>' : '')
+    + '<div class="pw-face" style="background:'+grad(u.theme)+'">'+u.emoji+'</div>'
+    + '<div class="pw-title">嗨，'+esc(u.name)+'</div>'
+    + '<div class="pw-say">輸入你的密碼，就可以編輯了</div>'
+    + '<form onsubmit="return doUnlock(event)">'
+    +   '<div class="field"><div class="pw-wrap">'
+    +     '<input id="pw-input" type="'+(uiUnlock.show?"text":"password")+'" inputmode="text" '
+    +       'autocomplete="current-password" autocapitalize="off" spellcheck="false" placeholder="你的密碼">'
+    +     '<button type="button" class="pw-eye" onclick="togglePw()" aria-label="顯示密碼">'+(uiUnlock.show?"🙈":"👁")+'</button>'
+    +   '</div></div>'
+    +   err
+    +   '<label class="check-row"><input type="checkbox" id="pw-remember" '+(uiUnlock.remember?"checked":"")+'>'
+    +     '<span class="ck-box"></span>'
+    +     '<span class="ck-lb">記住這台裝置<small>下次打開就直接能編輯。別人的電腦記得取消。</small></span></label>'
+    +   '<button class="btn-primary" type="submit" id="pw-go" '+(uiUnlock.busy?"disabled":"")+'>'
+    +     (uiUnlock.busy ? '<span class="spin"></span>解開中…' : '解鎖')+'</button>'
+    + '</form>'
+    + '<div class="u-peek"><button class="peek-link" onclick="peek()">先看看就好 →</button></div>';
+}
+function togglePw(){
+  var v=$("pw-input") ? $("pw-input").value : "";
+  uiUnlock.show=!uiUnlock.show; uiUnlock.remember = $("pw-remember") ? $("pw-remember").checked : true;
+  drawUnlock();
+  if($("pw-input")){ $("pw-input").value=v; $("pw-input").focus(); }
+}
+function doUnlock(e){
+  e.preventDefault();
+  if(uiUnlock.busy) return false;
+  var val = $("pw-input").value;
+  uiUnlock.remember = $("pw-remember").checked;
+  if(!val){ toast("先輸入密碼喔", "err"); return false; }
+  uiUnlock.busy=true; drawUnlock();
+  /* 真實版這裡是瀏覽器解密，約 0.5~1 秒，所以留一個等待狀態 */
+  setTimeout(function(){
+    var u=userById(uiUnlock.userId);
+    uiUnlock.busy=false;
+    if(val===u.pw){
+      device.mode="unlocked"; device.userId=u.id;
+      closeSheet(); render();
+      toast("解開了，"+u.name+" 現在可以編輯 🎉", "ok");
+    }else{
+      uiUnlock.tries++; drawUnlock();
+      if($("pw-input")) $("pw-input").focus();
+    }
+  }, 750);
+  return false;
+}
+
+/* ---------- 身分 sheet（已解鎖時） ---------- */
+function openIdentity(){
+  var u=userById(device.userId);
+  openSheet('<div class="grab"></div>'
+    + '<div class="sheet-head"><h3>現在是你在用</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<div class="id-row"><div class="id-face" style="background:'+grad(u.theme)+'">'+u.emoji+'</div>'
+    +   '<div class="id-bd"><b>'+esc(u.name)+'</b><span>這台裝置記住了你的鑰匙，可以編輯</span></div></div>'
+    + '<button class="btn-ghost" onclick="askSwitch()" style="margin-bottom:10px">🔄 換人用</button>'
+    + '<button class="btn-primary" onclick="closeSheet()">好，繼續用</button>');
+}
+function askSwitch(){
+  openSheet('<div class="grab"></div>'
+    + '<div class="sheet-head"><h3>要換人嗎？</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<div class="warnbox">換人會把這台裝置記住的鑰匙清掉，回到「只看看」。<br>下一個人自己選名字、輸密碼就好。</div>'
+    + '<button class="btn-danger" onclick="doSwitch()" style="margin-bottom:10px">清掉，換人</button>'
+    + '<button class="btn-ghost" onclick="openIdentity()">先不要</button>');
+}
+function doSwitch(){
+  device.mode="locked"; device.userId=null;
+  render(); openUnlock("");
+  toast("已經清掉，換誰用都可以");
+}
+
+/* ---------- sheet / dialog 基礎 ---------- */
+function openSheet(html, focusId){
+  var layer=$("sheet-layer"); layer.hidden=false;
+  layer.innerHTML='<div class="backdrop" onclick="closeSheet()"></div><div class="sheet">'+html+'</div>';
+  if(focusId) setTimeout(function(){ var el=$(focusId); if(el) el.focus(); }, 60);
+}
+function openDialog(html, focusId){
+  var layer=$("sheet-layer"); layer.hidden=false;
+  layer.innerHTML='<div class="backdrop" onclick="closeSheet()"></div><div class="dialog">'+html+'</div>';
+  if(focusId) setTimeout(function(){ var el=$(focusId); if(el) el.focus(); }, 60);
+}
+function closeSheet(){ var l=$("sheet-layer"); l.hidden=true; l.innerHTML=""; }
+
+/* =========================================================
+   B. 後台（Benson 自己的電腦）
+   ========================================================= */
+function markChange(txt){
+  D.pending.push({id:uid(), text:txt});
+  render();
+}
+function maskKey(k){
+  if(!k) return "";
+  if(k.length<=18) return k;
+  return k.slice(0,14)+"••••••••"+k.slice(-4);
+}
+function pubBar(){
+  var n=D.pending.length;
+  if(!n){
+    return '<div class="pub-bar"><div class="pub-txt"><b>✓ 都發布了</b>'
+      + '<span>上次發布 '+esc(D.lastPublish)+'　各裝置打開就是最新的</span></div>'
+      + '<button class="pub-btn" onclick="toast(\'沒有東西要發布\')">發布</button></div>';
+  }
+  var list = pubOpen
+    ? '<ul class="pub-list">'+D.pending.map(function(p){ return '<li>・'+esc(p.text)+'</li>'; }).join("")+'</ul>'
+    : '';
+  return '<div class="pub-bar dirty"><div class="pub-txt"><b>有 '+n+' 項改動還沒發布</b>'
+    + '<span>上次發布 '+esc(D.lastPublish)+'　'
+    + '<button class="pub-more" onclick="pubOpen='+(!pubOpen)+';render()">'+(pubOpen?"收起來":"看改了什麼")+'</button></span></div>'
+    + '<button class="pub-btn" onclick="doPublish()">發布出去</button>'
+    + list + '</div>';
+}
+function doPublish(){
+  var btn=document.querySelector(".pub-btn");
+  if(btn){ btn.textContent="發布中…"; btn.disabled=true; }
+  setTimeout(function(){
+    var d=new Date();
+    D.lastPublish=(d.getMonth()+1)+"/"+d.getDate()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+    D.pending=[]; pubOpen=false; render();
+    toast("發布好了，各裝置下次打開就會拿到新的鑰匙圈", "ok");
+  }, 1100);
+}
+function viewAdmin(){
+  return '<div id="admin">'
+    + '<div class="ad-head"><div><h1>🔑 鑰匙圈</h1>'
+    +   '<p>管理誰可以編輯哪個 App。改完記得發布。</p></div></div>'
+    + pubBar()
+    + '<div class="ad-tabs">'
+    +   '<button class="'+(adTab==="users"?"on":"")+'" onclick="adTab=\'users\';render()">👥 使用者</button>'
+    +   '<button class="'+(adTab==="apps"?"on":"")+'" onclick="adTab=\'apps\';render()">📦 App 金鑰</button>'
+    + '</div>'
+    + (adTab==="users" ? adUsers() : adApps())
+    + '<div class="ad-foot">密碼是各自加密的，這裡看不到、也救不回來。<br>有人忘記密碼，就在這裡幫他換一組新的。</div>'
+    + '</div>';
+}
+function adUsers(){
+  var rows = D.users.map(function(u){
+    var chips = u.apps.length
+      ? u.apps.map(function(a){ var ap=appById(a); return ap ? '<span class="chip">'+ap.emoji+' '+esc(ap.name)+'</span>' : ""; }).join("")
+      : '<span class="chip none">還沒給任何 App</span>';
+    return '<div class="rowcard">'
+      + '<div class="rc-face" style="background:'+grad(u.theme)+'">'+u.emoji+'</div>'
+      + '<div class="rc-bd"><b>'+esc(u.name)+'</b><div class="chips">'+chips+'</div></div>'
+      + '<div class="rc-acts">'
+      +   '<button onclick="openUserForm(\''+u.id+'\')">編輯</button>'
+      +   '<button onclick="openPwForm(\''+u.id+'\')">換密碼</button>'
+      +   '<button class="danger" onclick="askDeleteUser(\''+u.id+'\')">刪除</button>'
+      + '</div></div>';
+  }).join("");
+  return '<div class="sec-title">使用者（'+D.users.length+'）</div>'+rows
+    + '<button class="addcard" onclick="openUserForm(null)">＋ 新增使用者</button>';
+}
+function adApps(){
+  var rows = D.apps.map(function(a){
+    var who = D.users.filter(function(u){ return u.apps.indexOf(a.id)>=0; });
+    var chips = who.length
+      ? who.map(function(u){ return '<span class="chip">'+u.emoji+' '+esc(u.name)+'</span>'; }).join("")
+      : '<span class="chip none">還沒有人可以用</span>';
+    return '<div class="rowcard">'
+      + '<div class="rc-face" style="background:'+grad("sand")+'">'+a.emoji+'</div>'
+      + '<div class="rc-bd"><b>'+esc(a.name)+'</b>'
+      +   '<div class="keyline">'+esc(maskKey(a.key))+'</div>'
+      +   '<div class="chips">'+chips+'</div></div>'
+      + '<div class="rc-acts">'
+      +   '<button onclick="openKeyForm(\''+a.id+'\')">換金鑰</button>'
+      +   '<button onclick="openAppWho(\''+a.id+'\')">誰可以用</button>'
+      +   '<button class="danger" onclick="askDeleteApp(\''+a.id+'\')">刪除</button>'
+      + '</div></div>';
+  }).join("");
+  return '<div class="sec-title">App（'+D.apps.length+'）</div>'+rows
+    + '<button class="addcard" onclick="openAppForm()">＋ 登記新的 App</button>';
+}
+
+/* ---------- 使用者表單 ---------- */
+var formState = {};
+function pwHint(v){
+  if(!v) return "";
+  if(v.length<4) return "這組很短，記得住就好——存得下去。";
+  if(/^\d+$/.test(v) && v.length<7) return "全是數字，有點好猜——不擋你，想清楚就好。";
+  return "看起來可以。";
+}
+function livePw(){
+  var v=$("uf-pw") ? $("uf-pw").value : "";
+  var m=$("uf-pwhint"); if(!m) return;
+  var h=pwHint(v);
+  m.textContent=h;
+  m.className="pw-meter"+(h && h!=="看起來可以。" ? " weak":"");
+}
+function openUserForm(id){
+  var u = id ? userById(id) : null;
+  formState = {
+    id: id, name:u?u.name:"", emoji:u?u.emoji:"🧑", theme:u?u.theme:"night",
+    apps:u?u.apps.slice():D.apps.map(function(a){return a.id;}), show:false
+  };
+  drawUserForm();
+}
+function drawUserForm(){
+  var f=formState, isNew=!f.id;
+  var emojiPicks = EMOJIS.map(function(e){
+    return '<label class="pick"><input type="radio" name="ufe" '+(f.emoji===e?"checked":"")
+      + ' onchange="formState.emoji=\''+e+'\'"><span>'+e+'</span></label>';
+  }).join("");
+  var themePicks = THEME_KEYS.map(function(k){
+    return '<label class="pick"><input type="radio" name="uft" '+(f.theme===k?"checked":"")
+      + ' onchange="formState.theme=\''+k+'\'"><span class="swatch" style="background:'+THEMES[k]+'"></span></label>';
+  }).join("");
+  var appChecks = D.apps.map(function(a){
+    var on = f.apps.indexOf(a.id)>=0;
+    return '<label class="appcheck"><input type="checkbox" '+(on?"checked":"")
+      + ' onchange="toggleFormApp(\''+a.id+'\',this.checked)">'
+      + '<span class="em">'+a.emoji+'</span>'
+      + '<span class="nm">'+esc(a.name)+'<small>'+esc(a.url.replace(/^https:\/\//,""))+'</small></span>'
+      + '<span class="ck-box"></span></label>';
+  }).join("");
+  openDialog(
+    '<div class="sheet-head"><h3>'+(isNew?"新增使用者":"編輯 "+esc(f.name))+'</h3>'
+    + '<button onclick="closeSheet()">✕</button></div>'
+    + '<label class="field"><span class="fl">名字</span>'
+    +   '<input id="uf-name" value="'+esc(f.name)+'" placeholder="他要看到的名字" autocomplete="off"></label>'
+    + '<div class="field"><span class="fl">頭像</span><div class="pickrow">'+emojiPicks+'</div></div>'
+    + '<div class="field"><span class="fl">顏色</span><div class="pickrow">'+themePicks+'</div></div>'
+    + '<div class="field"><span class="fl">可以用哪些 App</span><div class="applist">'+appChecks+'</div></div>'
+    + (isNew
+        ? '<label class="field"><span class="fl">密碼</span><div class="pw-wrap">'
+          + '<input id="uf-pw" type="'+(f.show?"text":"password")+'" placeholder="他要輸入的密碼" '
+          + 'autocomplete="new-password" autocapitalize="off" spellcheck="false" oninput="livePw()">'
+          + '<button type="button" class="pw-eye" onclick="toggleFormPw()">'+(f.show?"🙈":"👁")+'</button>'
+          + '</div><div class="pw-meter" id="uf-pwhint"></div></label>'
+          + '<div class="hint">短的、好記的都行，這裡不擋。設好之後親口告訴他就可以。</div>'
+        : '<div class="hint">密碼要改的話，用列表上的「換密碼」。</div>')
+    + '<button class="btn-primary" onclick="saveUser()">'+(isNew?"建立":"儲存")+'</button>',
+    "uf-name");
+}
+function toggleFormApp(id, on){
+  var i=formState.apps.indexOf(id);
+  if(on && i<0) formState.apps.push(id);
+  if(!on && i>=0) formState.apps.splice(i,1);
+}
+function toggleFormPw(){
+  var v=$("uf-pw")?$("uf-pw").value:"";
+  formState.name = $("uf-name") ? $("uf-name").value : formState.name;
+  formState.show=!formState.show; drawUserForm();
+  if($("uf-pw")){ $("uf-pw").value=v; $("uf-pw").focus(); livePw(); }
+}
+function saveUser(){
+  var f=formState;
+  var name=($("uf-name").value||"").trim();
+  if(!name){ toast("先幫他取個名字", "err"); $("uf-name").focus(); return; }
+  if(f.id){
+    var u=userById(f.id);
+    u.name=name; u.emoji=f.emoji; u.theme=f.theme; u.apps=f.apps.slice();
+    markChange("改了「"+name+"」的資料");
+    closeSheet(); toast("存好了");
+  }else{
+    var pw=$("uf-pw").value||"";
+    if(!pw){ toast("先設一組密碼給他", "err"); $("uf-pw").focus(); return; }
+    var nu={id:uid(), name:name, emoji:f.emoji, theme:f.theme, pw:pw, apps:f.apps.slice()};
+    D.users.push(nu);
+    markChange("新增了使用者「"+name+"」");
+    showHandover(nu, pw, "建立好了");
+  }
+}
+/* 建好之後：怎麼告訴對方 */
+function sayText(u, pw){
+  var ap = u.apps.length ? appById(u.apps[0]) : null;
+  var url = ap ? ap.url : "（App 網址）";
+  var nm  = ap ? ap.name : "App";
+  return nm+"可以編輯囉：\n"
+    + "1. 打開 "+url+"\n"
+    + "2. 點最下面那條「只看看模式・點我解鎖」\n"
+    + "3. 選「"+u.name+"」，密碼是 "+pw+"\n"
+    + "之後這支手機就記住了，下次打開直接能改。";
+}
+function showHandover(u, pw, title){
+  var txt=sayText(u,pw);
+  openDialog(
+    '<div class="sheet-head"><h3>'+title+'</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<div class="okbox"><b>'+u.emoji+' '+esc(u.name)+' 的鑰匙已經配好</b>'
+    +   '<p>還要按上面的「發布出去」，他那邊才拿得到。</p></div>'
+    + '<div class="sec-title" style="margin-left:0">告訴他的話（可以直接傳）</div>'
+    + '<div class="saytext" id="say-text">'+esc(txt)+'</div>'
+    + '<div class="hint">這段話裡有密碼，傳完記得把訊息刪掉。</div>'
+    + '<button class="btn-ghost" onclick="copySay()" style="margin-bottom:10px">📋 複製這段話</button>'
+    + '<button class="btn-primary" onclick="closeSheet()">好</button>');
+}
+function copySay(){
+  var t=$("say-text").textContent;
+  function ok(){ toast("複製好了，貼給他就行", "ok"); }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(ok, fallback);
+  }else fallback();
+  function fallback(){
+    var ta=document.createElement("textarea"); ta.value=t;
+    ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta);
+    ta.select();
+    try{ document.execCommand("copy"); ok(); }catch(e){ toast("複製不了，長按上面那段自己選吧", "err"); }
+    document.body.removeChild(ta);
+  }
+}
+/* 換密碼 */
+function openPwForm(id){
+  var u=userById(id);
+  formState={id:id, show:false};
+  drawPwForm(u);
+}
+function drawPwForm(u){
+  openDialog(
+    '<div class="sheet-head"><h3>幫 '+esc(u.name)+' 換密碼</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<div class="hint" style="margin-top:0">舊密碼看不到也想不起來，直接給一組新的就好。</div>'
+    + '<label class="field"><span class="fl">新密碼</span><div class="pw-wrap">'
+    +   '<input id="uf-pw" type="'+(formState.show?"text":"password")+'" placeholder="新的密碼" '
+    +   'autocomplete="new-password" autocapitalize="off" spellcheck="false" oninput="livePw()">'
+    +   '<button type="button" class="pw-eye" onclick="togglePwForm(\''+u.id+'\')">'+(formState.show?"🙈":"👁")+'</button>'
+    + '</div><div class="pw-meter" id="uf-pwhint"></div></label>'
+    + '<div class="warnbox">換了之後，他已經解鎖過的裝置會回到「只看看」，要用新密碼再解一次。</div>'
+    + '<button class="btn-primary" onclick="savePw(\''+u.id+'\')">換成這組</button>',
+    "uf-pw");
+}
+function togglePwForm(id){
+  var v=$("uf-pw")?$("uf-pw").value:"";
+  formState.show=!formState.show; drawPwForm(userById(id));
+  if($("uf-pw")){ $("uf-pw").value=v; $("uf-pw").focus(); livePw(); }
+}
+function savePw(id){
+  var u=userById(id), pw=$("uf-pw").value||"";
+  if(!pw){ toast("先輸入新密碼", "err"); return; }
+  u.pw=pw;
+  markChange("換了「"+u.name+"」的密碼");
+  /* 手機那邊如果正好記著這個人，換密碼＝那台要重解 */
+  if(device.userId===id){ device.mode="locked"; device.userId=null; }
+  showHandover(u, pw, "密碼換好了");
+}
+function askDeleteUser(id){
+  var u=userById(id);
+  openDialog('<div class="sheet-head"><h3>要刪掉 '+esc(u.name)+' 嗎？</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<div class="warnbox">刪掉之後他就不能再編輯了（已經打開的裝置，下次重整就變成只看看）。</div>'
+    + '<button class="btn-danger" onclick="doDeleteUser(\''+id+'\')" style="margin-bottom:10px">刪掉</button>'
+    + '<button class="btn-ghost" onclick="closeSheet()">算了</button>');
+}
+function doDeleteUser(id){
+  var u=userById(id);
+  D.users=D.users.filter(function(x){ return x.id!==id; });
+  if(device.userId===id){ device.mode="locked"; device.userId=null; }
+  markChange("刪掉了使用者「"+u.name+"」");
+  closeSheet(); toast("刪掉了");
+}
+
+/* ---------- App 金鑰 ---------- */
+function openAppForm(){
+  formState={emoji:"📦", show:false};
+  drawAppForm();
+}
+function drawAppForm(){
+  var picks = ["📦","🧳","🍳","🏋️","📓","🎮"].map(function(e){
+    return '<label class="pick"><input type="radio" name="afe" '+(formState.emoji===e?"checked":"")
+      + ' onchange="formState.emoji=\''+e+'\'"><span>'+e+'</span></label>';
+  }).join("");
+  openDialog('<div class="sheet-head"><h3>登記新的 App</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<label class="field"><span class="fl">App 名稱</span><input id="af-name" placeholder="例：食譜本"></label>'
+    + '<div class="field"><span class="fl">圖示</span><div class="pickrow">'+picks+'</div></div>'
+    + '<label class="field"><span class="fl">網址</span>'
+    +   '<input id="af-url" placeholder="https://…" inputmode="url" autocapitalize="off" spellcheck="false"></label>'
+    + '<label class="field"><span class="fl">GitHub 金鑰</span>'
+    +   '<input id="af-key" type="'+(formState.show?"text":"password")+'" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>'
+    + '<div class="hint">貼這一次就好，之後只會顯示前後幾個字。</div>'
+    + '<button class="btn-primary" onclick="saveApp()">登記</button>', "af-name");
+}
+function saveApp(){
+  var n=($("af-name").value||"").trim(), u=($("af-url").value||"").trim(), k=($("af-key").value||"").trim();
+  if(!n){ toast("先給它一個名字", "err"); return; }
+  if(!k){ toast("要貼上金鑰才有東西可以發", "err"); return; }
+  D.apps.push({id:uid(), name:n, emoji:formState.emoji, url:u||"https://example.com/", key:k});
+  markChange("登記了新的 App「"+n+"」");
+  closeSheet(); toast("登記好了，記得去勾誰可以用");
+}
+function openKeyForm(id){
+  var a=appById(id);
+  openDialog('<div class="sheet-head"><h3>換「'+esc(a.name)+'」的金鑰</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<div class="hint" style="margin-top:0">目前：<span class="keyline">'+esc(maskKey(a.key))+'</span></div>'
+    + '<label class="field"><span class="fl">新的金鑰</span>'
+    +   '<input id="kf-key" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>'
+    + '<div class="warnbox">換金鑰不用改任何人的密碼，發布之後大家自動換到新的。</div>'
+    + '<button class="btn-primary" onclick="saveKey(\''+id+'\')">換上去</button>', "kf-key");
+}
+function saveKey(id){
+  var a=appById(id), k=($("kf-key").value||"").trim();
+  if(!k){ toast("先貼上新的金鑰", "err"); return; }
+  a.key=k; markChange("換了「"+a.name+"」的金鑰");
+  closeSheet(); toast("換好了");
+}
+function openAppWho(id){
+  var a=appById(id);
+  var list=D.users.map(function(u){
+    var on=u.apps.indexOf(id)>=0;
+    return '<label class="appcheck"><input type="checkbox" '+(on?"checked":"")
+      + ' onchange="setAppUser(\''+id+'\',\''+u.id+'\',this.checked)">'
+      + '<span class="em">'+u.emoji+'</span><span class="nm">'+esc(u.name)+'</span>'
+      + '<span class="ck-box"></span></label>';
+  }).join("");
+  openDialog('<div class="sheet-head"><h3>誰可以用「'+esc(a.name)+'」</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<div class="applist">'+list+'</div>'
+    + '<div class="hint" style="margin-top:12px">沒勾的人，解鎖後也拿不到這個 App 的鑰匙。</div>'
+    + '<button class="btn-primary" onclick="closeSheet()">好了</button>');
+}
+function setAppUser(appId, userId, on){
+  var u=userById(userId), i=u.apps.indexOf(appId), a=appById(appId);
+  if(on && i<0){ u.apps.push(appId); D.pending.push({id:uid(), text:"讓「"+u.name+"」可以用 "+a.name}); }
+  if(!on && i>=0){ u.apps.splice(i,1); D.pending.push({id:uid(), text:"收回「"+u.name+"」的 "+a.name}); }
+}
+function askDeleteApp(id){
+  var a=appById(id);
+  openDialog('<div class="sheet-head"><h3>要刪掉 '+esc(a.name)+' 嗎？</h3><button onclick="closeSheet()">✕</button></div>'
+    + '<div class="warnbox">刪掉之後，所有人都拿不到這個 App 的鑰匙了。</div>'
+    + '<button class="btn-danger" onclick="doDeleteApp(\''+id+'\')" style="margin-bottom:10px">刪掉</button>'
+    + '<button class="btn-ghost" onclick="closeSheet()">算了</button>');
+}
+function doDeleteApp(id){
+  var a=appById(id);
+  D.apps=D.apps.filter(function(x){ return x.id!==id; });
+  D.users.forEach(function(u){ u.apps=u.apps.filter(function(x){ return x!==id; }); });
+  markChange("刪掉了 App「"+a.name+"」");
+  closeSheet(); toast("刪掉了");
+}
+
+/* Esc 關閉 */
+document.addEventListener("keydown", function(e){
+  if(e.key==="Escape" && !$("sheet-layer").hidden) closeSheet();
+});
+
+render();
+maybeAutoUnlock();
+</script>
+</body>
+</html>
