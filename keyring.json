@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-18T06:35:07.409Z",
+  "updatedAt": "2026-08-18T06:35:28.569Z",
   "apps": [
     {
       "id": "travel-book",
@@ -17,12 +17,12 @@
       "kdf": {
         "algo": "PBKDF2-SHA256",
         "iter": 600000,
-        "salt": "gr+Cu5bG2QjrGlzMnBs/EQ=="
+        "salt": "vbgsGjTgDaLXPyMiMbgdwQ=="
       },
       "apps": {
         "travel-book": {
-          "iv": "m2BQiOBSqdUZQtop",
-          "cipher": "VBT1tbfIL5gYigmDyVPfXpUgJ9MPP18wXfONVBNmBuzwrhNkhWc1rQbKM6VXQBDvPVEgOjw8VKEeiahv1ieShOh4Fg=="
+          "iv": "a69u9nxEAf4fNQg3",
+          "cipher": "JeeOj1JZQ+qVmK2si25Z5niAcomSM0z2uizdK3lzxKkP7nEL8o5/wWympyqryWE9L1xitRsF/dStaOqzLA1Di82Hcg=="
         }
       }
     },
@@ -38,8 +38,8 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "YYcYAJar14pKEpGs",
-          "cipher": "GpxeVSdfL78fpUwX0+mkwN/Hvgv1LySMLSgEx0KJrVAdPbQfz6sT1HyPPkgqv/LvclUbN20sztdJDLrWvvtIEJ/MFA=="
+          "iv": "C2QD9Ejy63XEw0Le",
+          "cipher": "uCCcDGhVX8zmXuiHpffKJ6cR9JapmaPh3DD5M3cnWaklUHIcYrO08PHC2sv+gOKKmWBto0RAjF008hafju7upL/psw=="
         }
       }
     }
