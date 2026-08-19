@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-19T08:38:55.380Z",
+  "updatedAt": "2026-08-19T08:38:59.512Z",
   "apps": [
     {
       "id": "travel-book",
@@ -26,8 +26,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "P+JINn5LVF2hwLlk",
-          "cipher": "SqDQBoKF5yME7Qr67etVIqrxRaGk3zqKFtln8dtXvNC+wS0FgzBKbKrZx2pfSWiN7WySgZbXx91CA3vhaskv+3wgGywmhKvIwfv9leLkmSKnDYwfF25gNzmP8hTNEEDMQUSEo2ewOYbGJVhzwQ=="
+          "iv": "mP/1rux4vQMuIhkD",
+          "cipher": "T8pIyVba0ZYlBui4UO+XvO9SSwXnwqZQThLGCo3EKngJyJ3IDB+lP4EaD7ORA4ZJtdVJYMXlnjNcWk/JVXgVUNTMuOoBjHNmVubiZtB8U1Wybi2pvvE0WywiDJ35tmCP3izAhaU4QiIzLEF/yA=="
+        },
+        "recipe-book": {
+          "iv": "JmaQEALfr+ox1pzV",
+          "cipher": "GkMt1mVopGTWAVCUSApL+KnB/RQ9i6XLBPGIlncdVBSSVw7etBwmYXTn3UL20wUYbVqeDRujpKFfRfjU1KjqW5NyJ8Rf1lwMtqU2hJe4gLc4Dl64w2sKFRV1bsE2XvUjtDpi/5MI+NimkujjNA=="
         }
       }
     },
@@ -43,8 +47,8 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "XfmW5fS6g0Q24v/u",
-          "cipher": "kud32MT+PL+TKQOOBnMcxjvDX4DibZIRTBiMGFL9SMAWaOZKTXx4YhM0aW4W+B+QCWquDiZM5JG2vg2WurUeovbZVrJyBGO4LRp0hJmc0nLpLXJk4GSYPBc7mdC0u9vWQzGLgFQOQzvG0Ohaiw=="
+          "iv": "YVpNhsYx/HcS1Sfx",
+          "cipher": "JDSAT8sO1LztWTm9woAwPszAtntWvmlERKhaqh7PMp9aUhhOOydjvHS/0CXTYpXeYNz9niqzIQlNfSwyzGMywtHlHjyJvD2toGn9h74MvOzbWHN41f2RrDor5Ej7ZtooJ+MQCWEbsiruzm0nPQ=="
         }
       }
     }
