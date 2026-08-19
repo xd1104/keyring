@@ -282,3 +282,72 @@ Benson 怎麼告訴女友？**口頭就好，但我們把話寫好給他複製**
 ---
 
 *demo 試玩密碼：Benson＝`1234`／女友＝`abcd`；右上「重置 demo」回到「這台裝置沒解鎖過」的狀態。*
+
+---
+
+# 解鎖畫面 v2 視覺改版（2026-08-18・lab-ux）
+
+實作已上線，功能驗收過，但視覺不對。**只改視覺，狀態機、sheet 形式、「記住這台裝置」、密碼顯示切換、唯讀入口全部不動。**
+
+Demo：`demo/unlock-v2.html`（雙擊即開；四格並排＝現況／A／B／C，上方切「選人／輸密碼／密碼錯了」）。
+
+## 1. 我的診斷（跟 PM 的假設不同）
+
+PM 懷疑「頭像磚那兩組漸層不在 App 的色票裡」。**這點不成立**：`#38c3a7→#2f8fd6` 就是 `THEMES.ocean`、`#ff8a80→#ff5f7e→#c94b9d` 就是 `THEMES.sunset`，都是 travel-planner `app.js` 自己的顏色。真正的問題有三層：
+
+1. **語意借錯層**。在旅途手帳裡，這幾組漸層只代表一件事：**一趟旅程**（`.cover` 旅程封面、`.mem-emoji` 回憶列）。把它套到「人」身上，等於宣告身分是內容；但身分是介面外框（chrome），不該跟旅程搶同一種視覺語言。使用者看到的是「兩張沒有名字的旅程卡」。
+2. **面積與密度超標**。App 任何一個畫面同時只出現一塊大漸層（一張卡一個封面，外面包白卡＋米色 meta 列稀釋）。解鎖 sheet 一次放兩塊 116px 滿彩度色塊、只隔 12px、底下是純白，**這是全 App 最吵的一格畫面，卻是最不重要的內容**。加上封面用的 `text-shadow`／`drop-shadow` 是為 110px 大圖調的，縮到 34px emoji 就只剩糊。
+3. **同一件事講四次**。標題「誰在用？」＋副標「選你自己，輸入密碼，這台裝置就記住了。」＋兩塊磚＋「不用密碼也能看…」＋「先看看就好 →」，sheet 高 357px，而實際只是要按一下自己的名字。
+4. 附帶：**珊瑚色 `--acc` 在第一步完全沒出現**，所以這張 sheet 不像這個 App 的東西。
+
+## 2. 三個方向
+
+| | A・一行式 | B・暖卡列（推薦） | C・兩顆按鈕 |
+|---|---|---|---|
+| 頭像 | 完全拿掉 | 44px、漸層壓到 ~20% 當底 | 完全拿掉 |
+| 排版 | 名字列（抄 `.mem-row`） | 橫向卡列 | 兩顆全寬按鈕 |
+| 主色 | 只有按鈕是珊瑚 | 只有按鈕是珊瑚 | 選人步驟就用珊瑚 |
+| sheet 高 | ~235px | ~265px | ~250px |
+| 取捨 | 少了一眼認人的親切感 | 比 A 多一層卡片 | 主次是猜的（靠上次解鎖的人） |
+
+- **A（大幅減法）**：拿掉頭像、拿掉副標、把「不能改東西」併進連結文字。整張 sheet 只剩白＋墨色＋一顆珊瑚鈕，後面的旅程封面重新變回畫面上最亮的東西。零新元件。
+- **B（推薦）**：保留辨識、但把身分從「內容層」降到「配角層」——同一組 `THEMES` 漸層壓到 20% 當 44px 頭像底色，認得出誰是誰，卻不再是色塊。一列一個人，右邊可掛一行小字（例「上次是這位用這台」），之後加人不爆版。
+- **C**：把選人做成兩顆全寬按鈕（用 App 現成的 `.btn-primary`／`.btn-ghost` 語彙）。最像「一句話問完」、觸控目標最大；但要靠「上次解鎖的人」決定誰是珊瑚色，猜錯時第二個人會覺得自己是次要的。
+
+## 3. 我推薦 B
+
+理由：①**唯一同時解掉「太吵」和「不失溫」的**——旅途手帳整體是 emoji 很重的語言（旅程、行李區都有 emoji），A 全拿掉會比 App 其他地方更冷；②漸層仍在，但降到 20%＋44px，**語意上明確是「一個人的標記」而不是「一趟旅程」**；③卡列是唯一往上長得動的排版（第三、第四個人加進來不用重設計）。
+A 是安全備案（如果 Benson 要更靜）；C 適合「這台就是我的手機」的假設成立時，但那是功能決策，不該在純視覺這輪順便改。
+
+## 4. 定案後 lab-dev 要改哪些（以 B 為例）
+
+檔案：`client/keyring-unlock.js`（正本，改完複製給各 App）。**只動 CSS 字串與兩處 template；JS 流程、事件、狀態不動。**
+
+**新增常數**（放在 `THEMES` 旁）：頭像底色用的柔化表，別在 runtime 算 alpha。
+
+| theme | tint（頭像底） |
+|---|---|
+| sunset | `linear-gradient(135deg,rgba(255,138,128,.24),rgba(201,75,157,.20))` |
+| ocean | `linear-gradient(135deg,rgba(56,195,167,.24),rgba(47,143,214,.20))` |
+| night | `linear-gradient(135deg,rgba(106,123,240,.22),rgba(142,84,201,.20))` |
+| forest | `linear-gradient(135deg,rgba(126,201,111,.26),rgba(63,157,138,.22))` |
+| sand | `linear-gradient(135deg,rgba(245,198,93,.30),rgba(240,133,92,.24))` |
+
+**第一步（選人）**
+- `.kr-grid`：`grid` → `display:flex; flex-direction:column; gap:8px;`（class 名不改，省得動 JS）。
+- `.kr-tile`：改成橫向列 — `flex-direction:row; align-items:center; gap:12px; min-height:64px; padding:10px 12px; border-radius:16px; background:#fbf9f4; border:1px solid #efe9dd; color:var(--ink); text-align:left;`。**移除 `color:#fff`**。`:active` 改 `background:#f5f1e8`（不要 scale）。
+- `sheetWho()` 那行的 inline `style="background:grad(u.theme)"` **從 `.kr-tile` 移到 `.em`**，值改用上表的 tint。
+- `.kr-tile .em`：`width:44px; height:44px; border-radius:14px; font-size:23px; display:flex; align-items:center; justify-content:center; flex:0 0 auto;` **拿掉 `filter:drop-shadow(...)`**。
+- `.kr-tile .nm`：`font-size:16.5px; font-weight:700;` **拿掉 `text-shadow`**；外面包一層 `.kr-tx`（新增，`flex:1; min-width:0;`），底下可放 `.kr-tile .sub`（新增，`font-size:12.5px; color:var(--muted); margin-top:2px;`）給「上次是這位用這台」。
+- 新增 `.kr-tile .go`（`›`，`font-size:18px; color:#cfc5b3;`）放最右。
+- `.kr-sub` 文案改「選自己、輸密碼，這台就記住了。」，樣式 `margin:2px 0 12px; font-size:13.5px;`。
+- `.kr-peek`：**刪掉裡面的 `<p>`**，只留 `.kr-peek-link`，文案改「先看看就好（不能改東西）」；`.kr-peek` 改 `margin-top:10px; padding-top:6px;`。
+
+**第二步（輸密碼）**
+- **拿掉 `.kr-face`（74px 大頭）、`.kr-title`、`.kr-saytxt` 三個置中區塊**，改用既有的 `.kr-id` / `.kr-id-face` 橫列：`.kr-id-face` 尺寸 56 → `44px/14px radius/23px emoji`、背景改吃 tint（不是 `grad`）；`.kr-id b` = 名字（18px），`.kr-id span` = 「輸入密碼就可以編輯」。
+- `.kr-field`、`.kr-eye`、`.kr-err`、`.kr-check`／`.kr-box`／`.kr-lb`、`.kr-go`、`.kr-peek-link`：**完全不動**。
+
+**若改選 A**：`.kr-grid` 同樣改直向、`.kr-tile` 改成 `min-height:60px; padding:0 18px; margin:0 -18px; border-top:1px solid #f2ecdf; background:none; border-radius:0;`，`.em` 整個不 render，`.nm` 17px/700；第二步把 `.kr-face` 拿掉、`.kr-title`／`.kr-saytxt` 改左對齊。
+**若改選 C**：`.kr-tile` 直接吃既有的 `.kr-go`（珊瑚）與 `.kr-ghost`（外框）樣式，`sheetWho()` 依 `keyring.device.userId`（上次解鎖的人）決定誰用 `.kr-go`；沒有上次紀錄時**全部用 `.kr-ghost`**，不要亂猜。
+
+**驗收線**：所有觸控目標 ≥44px、密碼 input `font-size:16px`（iOS 不自動放大）、第一步 sheet 高度 ≤280px、頭像底色與白底對比不得高到搶過旅程封面（肉眼比：sheet 打開時最亮的東西應該仍是後面的封面）。

@@ -28,12 +28,24 @@
     introDelay: 900,
     onChange: null,         /* function(state) 解鎖／換人／金鑰更新後呼叫 */
     toast: null,            /* function(msg, isErr) 借用 App 自己的 toast */
+    /* 滿彩度漸層＝各 App 的「一趟旅程／一道菜」用的語言。
+     * v2.1 起這個模組自己不再渲染它（身分是配角），留著當下面 tints 的來源對照：加新顏色時兩邊一起加。 */
     themes: {
       sunset: "linear-gradient(135deg,#ff8a80,#ff5f7e 55%,#c94b9d)",
       ocean:  "linear-gradient(135deg,#38c3a7,#2f8fd6)",
       night:  "linear-gradient(135deg,#6a7bf0,#8e54c9)",
       forest: "linear-gradient(135deg,#7ec96f,#3f9d8a)",
       sand:   "linear-gradient(135deg,#f5c65d,#f0855c)"
+    },
+    /* 頭像底色＝同一組漸層壓到 ~20%（v2.1 視覺改版）。
+     * 身分是介面外框、不是內容：滿彩度大色塊是「一趟旅程」的語言，人只配得到一枚淡淡的標記。
+     * 先算好放這裡，不要在 runtime 拆色碼算 alpha。 */
+    tints: {
+      sunset: "linear-gradient(135deg,rgba(255,138,128,.24),rgba(201,75,157,.20))",
+      ocean:  "linear-gradient(135deg,rgba(56,195,167,.24),rgba(47,143,214,.20))",
+      night:  "linear-gradient(135deg,rgba(106,123,240,.22),rgba(142,84,201,.20))",
+      forest: "linear-gradient(135deg,rgba(126,201,111,.26),rgba(63,157,138,.22))",
+      sand:   "linear-gradient(135deg,rgba(245,198,93,.30),rgba(240,133,92,.24))"
     }
   };
 
@@ -51,7 +63,7 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
-  function grad(t) { return CFG.themes[t] || CFG.themes.sunset; }
+  function tint(t) { return CFG.tints[t] || CFG.tints.sunset; }
   function say(msg, isErr) { if (typeof CFG.toast === "function") { try { CFG.toast(msg, isErr); } catch (e) { } } }
   function b64ToBytes(b64) {
     var bin = atob(String(b64 || "").replace(/\s/g, ""));
@@ -199,92 +211,114 @@
       : { unlocked: false };
   }
 
-  /* ---------------- 樣式（只注入一次） ---------------- */
+  /* ---------------- 樣式（只注入一次） ----------------
+   * ⚠️ 這份 CSS 是「注入到別人家的 App」裡跑的，宿主自己就有一整套 CSS。
+   * 所以每一條規則都用「同一個 class 寫兩次」（`.kr-x.kr-x` ＝ 權重 0,2,0）提權，
+   * 才壓得過宿主常見的 `.foo button` / `.foo input`（0,1,1）這種選擇器。
+   * 血淚：v2.0 的珊瑚色「解鎖」鈕被自己的 `.kr-sheet button` 通則壓成透明，
+   *      footer 身分藥丸被 travel-book 的 `.home-foot button` 壓成灰色小字。
+   * 新增規則請照這個寫法，不要為了某個 App 寫死宿主結構（例如 `.home-foot .kr-chip`）——
+   * 那樣下一個複製這個檔案的 App 又會壞一次。 */
   var CSS = ''
     + '#kr-layer{position:fixed; inset:0; z-index:120;}'
     + '#kr-layer[hidden]{display:none;}'
-    + '.kr-backdrop{position:absolute; inset:0; background:rgba(30,22,14,.45); animation:kr-fade .2s;}'
-    + '.kr-sheet{position:absolute; bottom:0; left:0; right:0; margin:0 auto; max-width:480px; background:#fff;'
+    + '.kr-backdrop.kr-backdrop{position:absolute; inset:0; background:rgba(30,22,14,.45); animation:kr-fade .2s;}'
+    + '.kr-sheet.kr-sheet{position:absolute; bottom:0; left:0; right:0; margin:0 auto; max-width:480px; background:#fff;'
     + ' border-radius:22px 22px 0 0; padding:14px 18px calc(22px + env(safe-area-inset-bottom));'
     + ' max-height:90dvh; overflow-y:auto; animation:kr-up .26s cubic-bezier(.2,.8,.3,1);'
-    + ' font-family:inherit; color:var(--ink,#2b2620);}'
+    + ' font-family:inherit; font-size:15px; line-height:1.5; text-align:left; color:var(--ink,#2b2620);}'
     + '@keyframes kr-up{from{transform:translateY(60%); opacity:.4;} to{transform:none; opacity:1;}}'
     + '@keyframes kr-fade{from{opacity:0;} to{opacity:1;}}'
     + '@keyframes kr-sp{to{transform:rotate(360deg);}}'
     + '.kr-sheet *{box-sizing:border-box;}'
-    + '.kr-sheet button{font-family:inherit; border:none; background:none; cursor:pointer; color:inherit; padding:0;}'
-    + '.kr-grab{width:38px; height:4px; border-radius:99px; background:#e4ddcf; margin:0 auto 10px;}'
-    + '.kr-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:8px;}'
-    + '.kr-head h3{font-size:19px; font-weight:800; margin:0;}'
-    + '.kr-x{min-width:46px; min-height:46px; font-size:18px; color:var(--muted,#8f8578);'
+    /* 內部通則：把宿主的 button 樣式洗掉。刻意維持 (0,1,1)，比下面每一條 (0,2,0) 都低。 */
+    + '.kr-sheet button{font-family:inherit; border:none; background:none; cursor:pointer; color:inherit;'
+    + ' padding:0; margin:0; appearance:none; -webkit-appearance:none; box-shadow:none; letter-spacing:normal;}'
+    + '.kr-grab.kr-grab{width:38px; height:4px; border-radius:99px; background:#e4ddcf; margin:0 auto 10px;}'
+    + '.kr-head.kr-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:8px;}'
+    + '.kr-head.kr-head h3{font-size:19px; font-weight:800; margin:0; color:var(--ink,#2b2620); letter-spacing:normal;}'
+    + '.kr-x.kr-x{min-width:46px; min-height:46px; font-size:18px; font-weight:400; color:var(--muted,#8f8578);'
     + ' display:flex; align-items:center; justify-content:center; flex:0 0 auto;}'
-    + '.kr-why{background:#fff1ef; color:var(--acc-deep,#e2503f); font-size:13.5px; font-weight:600;'
-    + ' border-radius:13px; padding:11px 13px; margin-bottom:14px; line-height:1.5;}'
-    + '.kr-sub{color:var(--muted,#8f8578); font-size:14px; margin:-4px 0 14px; line-height:1.55;}'
-    + '.kr-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}'
-    + '.kr-tile{border-radius:18px; min-height:116px; padding:14px; color:#fff; text-align:left;'
-    + ' display:flex; flex-direction:column; justify-content:space-between; box-shadow:0 4px 14px rgba(70,55,30,.14);}'
-    + '.kr-tile:active{transform:scale(.97);}'
-    + '.kr-tile .em{font-size:34px; line-height:1; filter:drop-shadow(0 2px 6px rgba(0,0,0,.25));}'
-    + '.kr-tile .nm{font-size:17px; font-weight:800; text-shadow:0 1px 8px rgba(0,0,0,.28);}'
-    + '.kr-peek{margin-top:20px; padding-top:16px; border-top:1px solid #f2ecdf; text-align:center;}'
-    + '.kr-peek p{font-size:13px; color:var(--muted,#8f8578); line-height:1.6; margin:0;}'
-    + '.kr-peek-link{min-height:44px; padding:0 14px; margin-top:2px; font-size:15px; font-weight:700;'
+    + '.kr-why.kr-why{background:#fff1ef; color:var(--acc-deep,#e2503f); font-size:13.5px; font-weight:600;'
+    + ' border-radius:13px; padding:11px 13px; margin:0 0 14px; line-height:1.5;}'
+    + '.kr-sub.kr-sub{color:var(--muted,#8f8578); font-size:13.5px; margin:2px 0 12px; line-height:1.55;}'
+    /* 選人：橫向暖卡列（v2.1） */
+    + '.kr-grid.kr-grid{display:flex; flex-direction:column; gap:8px;}'
+    + '.kr-tile.kr-tile{display:flex; flex-direction:row; align-items:center; gap:12px; min-height:64px; width:100%;'
+    + ' padding:10px 12px; border-radius:16px; background:#fbf9f4; border:1px solid #efe9dd;'
+    + ' color:var(--ink,#2b2620); font-size:15px; text-align:left;}'
+    + '.kr-tile.kr-tile:active{background:#f5f1e8;}'
+    + '.kr-tile.kr-tile .em{width:44px; height:44px; border-radius:14px; font-size:23px; line-height:1;'
+    + ' display:flex; align-items:center; justify-content:center; flex:0 0 auto;}'
+    + '.kr-tx.kr-tx{flex:1; min-width:0;}'
+    + '.kr-tile.kr-tile .nm{display:block; font-size:16.5px; font-weight:700; color:var(--ink,#2b2620);}'
+    + '.kr-tile.kr-tile .go{font-size:18px; line-height:1; color:#cfc5b3; flex:0 0 auto;}'
+    + '.kr-peek.kr-peek{margin-top:10px; padding-top:6px; border-top:1px solid #f2ecdf; text-align:center;}'
+    + '.kr-peek-link.kr-peek-link{min-height:44px; padding:0 14px; margin-top:2px; font-size:15px; font-weight:700;'
     + ' color:#6b6154; text-decoration:underline;}'
-    + '.kr-back{min-height:44px; padding:0 10px 0 0; font-size:14.5px; font-weight:700; color:var(--muted,#8f8578);}'
-    + '.kr-face{width:74px; height:74px; border-radius:22px; margin:2px auto 12px; display:flex; align-items:center;'
-    + ' justify-content:center; font-size:36px; color:#fff; box-shadow:0 6px 18px rgba(70,55,30,.18);}'
-    + '.kr-title{text-align:center; font-size:21px; font-weight:800;}'
-    + '.kr-saytxt{text-align:center; font-size:13.5px; color:var(--muted,#8f8578); margin:6px 0 16px; line-height:1.55;}'
-    + '.kr-field{display:block; margin-bottom:13px; position:relative;}'
-    + '.kr-field input{width:100%; font-size:16px; font-family:inherit; color:var(--ink,#2b2620);'
-    + ' padding:13px 56px 13px 13px; border:1.5px solid var(--line,#e8e1d5); border-radius:13px; background:#fbfaf6;'
-    + ' appearance:none; -webkit-appearance:none;}'
-    + '.kr-field input:focus{outline:none; border-color:var(--acc,#ff6b5e);}'
-    + '.kr-eye{position:absolute; right:4px; top:50%; transform:translateY(-50%); width:48px; height:48px;'
+    + '.kr-back.kr-back{min-height:44px; padding:0 10px 0 0; font-size:14.5px; font-weight:700; color:var(--muted,#8f8578);}'
+    + '.kr-field.kr-field{display:block; margin:0 0 13px; position:relative;}'
+    + '.kr-field.kr-field input{width:100%; font-size:16px; font-family:inherit; font-weight:400; line-height:normal;'
+    + ' color:var(--ink,#2b2620); padding:13px 56px 13px 13px; margin:0;'
+    + ' border:1.5px solid var(--line,#e8e1d5); border-radius:13px; background:#fbfaf6;'
+    + ' appearance:none; -webkit-appearance:none; box-shadow:none;}'
+    + '.kr-field.kr-field input:focus{outline:none; border-color:var(--acc,#ff6b5e);}'
+    + '.kr-eye.kr-eye{position:absolute; right:4px; top:50%; transform:translateY(-50%); width:48px; height:48px;'
     + ' display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--muted,#8f8578);}'
-    + '.kr-err{background:#fbeeee; color:var(--bad,#d64545); font-size:13.5px; font-weight:700; border-radius:12px;'
+    + '.kr-err.kr-err{background:#fbeeee; color:var(--bad,#d64545); font-size:13.5px; font-weight:700; border-radius:12px;'
     + ' padding:10px 12px; margin:10px 0 2px; line-height:1.5;}'
-    + '.kr-err span{display:block; font-weight:500; color:#a4655f; font-size:12.5px; margin-top:4px;}'
-    + '.kr-check{display:flex; align-items:center; gap:10px; min-height:48px; cursor:pointer; position:relative;}'
-    + '.kr-check input{position:absolute; opacity:0; width:1px; height:1px;}'
-    + '.kr-box{width:26px; height:26px; border-radius:8px; border:2px solid #d6cbb8; background:#fbfaf6; flex:0 0 auto;'
+    + '.kr-err.kr-err span{display:block; font-weight:500; color:#a4655f; font-size:12.5px; margin-top:4px;}'
+    + '.kr-check.kr-check{display:flex; align-items:center; gap:10px; min-height:48px; margin:0; cursor:pointer; position:relative;}'
+    + '.kr-check.kr-check input{position:absolute; opacity:0; width:1px; height:1px; margin:0;}'
+    + '.kr-box.kr-box{width:26px; height:26px; border-radius:8px; border:2px solid #d6cbb8; background:#fbfaf6; flex:0 0 auto;'
     + ' display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px;}'
-    + '.kr-check input:checked + .kr-box{background:var(--acc,#ff6b5e); border-color:var(--acc,#ff6b5e);}'
-    + '.kr-check input:checked + .kr-box::after{content:"\\2713";}'
-    + '.kr-lb{font-size:15.5px; font-weight:600;}'
-    + '.kr-lb small{display:block; font-size:12.5px; color:var(--muted,#8f8578); font-weight:500; margin-top:2px;}'
-    + '.kr-go{width:100%; min-height:52px; border-radius:15px; background:var(--acc,#ff6b5e); color:#fff;'
+    + '.kr-check.kr-check input:checked + .kr-box{background:var(--acc,#ff6b5e); border-color:var(--acc,#ff6b5e);}'
+    + '.kr-check.kr-check input:checked + .kr-box::after{content:"\\2713";}'
+    + '.kr-lb.kr-lb{font-size:15.5px; font-weight:600; color:var(--ink,#2b2620);}'
+    + '.kr-lb.kr-lb small{display:block; font-size:12.5px; color:var(--muted,#8f8578); font-weight:500; margin-top:2px;}'
+    + '.kr-go.kr-go{width:100%; min-height:52px; border-radius:15px; background:var(--acc,#ff6b5e); color:#fff;'
     + ' font-size:17px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:8px; margin-top:4px;}'
-    + '.kr-go[disabled]{opacity:.72;}'
-    + '.kr-ghost{width:100%; min-height:52px; border-radius:15px; border:1.5px solid var(--line,#e8e1d5);'
-    + ' background:#fbfaf6; font-size:16px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;}'
-    + '.kr-danger{width:100%; min-height:52px; border-radius:15px; background:#fbeeee; color:var(--bad,#d64545);'
+    + '.kr-go.kr-go[disabled]{opacity:.72;}'
+    + '.kr-ghost.kr-ghost{width:100%; min-height:52px; border-radius:15px; border:1.5px solid var(--line,#e8e1d5);'
+    + ' background:#fbfaf6; color:var(--ink,#2b2620); font-size:16px; font-weight:700;'
+    + ' display:flex; align-items:center; justify-content:center; gap:6px;}'
+    + '.kr-danger.kr-danger{width:100%; min-height:52px; border-radius:15px; background:#fbeeee; color:var(--bad,#d64545);'
     + ' font-size:16px; font-weight:700; display:flex; align-items:center; justify-content:center; gap:6px;}'
-    + '.kr-spin{width:17px; height:17px; border-radius:50%; border:2.5px solid rgba(255,255,255,.45);'
+    + '.kr-spin.kr-spin{width:17px; height:17px; border-radius:50%; border:2.5px solid rgba(255,255,255,.45);'
     + ' border-top-color:#fff; animation:kr-sp .7s linear infinite;}'
-    + '.kr-id{display:flex; align-items:center; gap:12px; padding:4px 0 16px;}'
-    + '.kr-id-face{width:56px; height:56px; border-radius:18px; display:flex; align-items:center;'
-    + ' justify-content:center; font-size:28px; color:#fff; flex:0 0 auto;}'
-    + '.kr-id b{display:block; font-size:18px;}'
-    + '.kr-id span{display:block; font-size:13px; color:var(--muted,#8f8578); margin-top:3px;}'
-    + '.kr-warn{background:#fff6e3; border:1px solid #f2dcae; border-radius:14px; padding:12px 14px;'
+    + '.kr-id.kr-id{display:flex; align-items:center; gap:12px; padding:2px 0 14px;}'
+    + '.kr-id-face.kr-id-face{width:44px; height:44px; border-radius:14px; display:flex; align-items:center;'
+    + ' justify-content:center; font-size:23px; flex:0 0 auto;}'
+    + '.kr-id.kr-id b{display:block; font-size:18px; font-weight:700; color:var(--ink,#2b2620);}'
+    + '.kr-id.kr-id span{display:block; font-size:13px; color:var(--muted,#8f8578); margin-top:2px;}'
+    + '.kr-warn.kr-warn{background:#fff6e3; border:1px solid #f2dcae; border-radius:14px; padding:12px 14px;'
     + ' font-size:13.5px; color:#8a5b12; line-height:1.6; margin-bottom:12px;}'
-    + '.kr-empty{text-align:center; color:var(--muted,#8f8578); font-size:14px; padding:18px 6px; line-height:1.7;}'
-    /* 首頁 footer 的身分藥丸 */
-    + '.kr-chip{display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px; border-radius:99px;'
-    + ' font-size:13.5px; font-weight:700; background:#fff1ef; color:var(--acc-deep,#e2503f); border:1px solid #ffd9d3;'
-    + ' text-decoration:none;}'
-    + '.kr-chip.on{background:#f3eee4; color:#6b6154; border-color:var(--line,#e8e1d5);}'
-    + '.kr-dot{width:24px; height:24px; border-radius:8px; display:flex; align-items:center; justify-content:center;'
-    + ' font-size:14px; color:#fff; flex:0 0 auto;}';
+    + '.kr-empty.kr-empty{text-align:center; color:var(--muted,#8f8578); font-size:14px; padding:18px 6px; line-height:1.7;}'
+    /* 首頁 footer 的身分藥丸：跑在宿主的 footer 裡，宿主的 button 樣式全部要擋掉 */
+    + '.kr-chip.kr-chip{display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px;'
+    + ' border-radius:99px; box-sizing:border-box; font-family:inherit; font-size:13.5px; font-weight:700;'
+    + ' line-height:1.2; letter-spacing:normal; text-decoration:none; cursor:pointer;'
+    + ' background:#fff1ef; color:var(--acc-deep,#e2503f); border:1px solid #ffd9d3;'
+    + ' appearance:none; -webkit-appearance:none; box-shadow:none;}'
+    + '.kr-chip.kr-chip.on{background:#f3eee4; color:#6b6154; border-color:var(--line,#e8e1d5);}'
+    + '.kr-dot.kr-dot{width:24px; height:24px; border-radius:8px; box-sizing:border-box; display:flex;'
+    + ' align-items:center; justify-content:center; font-size:14px; flex:0 0 auto;}';
 
-  function ensureDom() {
-    if (layer) return layer;
+  /* 樣式要在 init() 就注入：footer 的身分藥丸每次進站都看得到，
+   * 不能等到使用者第一次打開 sheet（paint）才有樣式。 */
+  function ensureStyle() {
+    if (document.getElementById("kr-style")) return;
+    var head = document.head || document.getElementsByTagName("head")[0];
+    if (!head) { document.addEventListener("DOMContentLoaded", ensureStyle); return; }
     var st = document.createElement("style");
     st.id = "kr-style";
     st.textContent = CSS;
-    document.head.appendChild(st);
+    head.appendChild(st);
+  }
+
+  function ensureDom() {
+    if (layer) return layer;
+    ensureStyle();
     layer = document.createElement("div");
     layer.id = "kr-layer";
     layer.hidden = true;
@@ -334,10 +368,10 @@
   function whyBar() {
     return ui.reason ? '<div class="kr-why">要「' + esc(ui.reason) + '」得先解鎖，選一下你是誰就好。</div>' : "";
   }
-  function peekBlock(withText) {
+  /* 「不能改東西」併進連結文字（v2.1）：原本上面那行說明跟連結講的是同一件事 */
+  function peekBlock() {
     return '<div class="kr-peek">'
-      + (withText ? '<p>不用密碼也能看，只是不能改東西。</p>' : '')
-      + '<button class="kr-peek-link" onclick="Keyring.peek()">先看看就好 →</button></div>';
+      + '<button class="kr-peek-link" onclick="Keyring.peek()">先看看就好（不能改東西）</button></div>';
   }
   function sheetWho() {
     var body;
@@ -350,16 +384,19 @@
       body = '<div class="kr-empty">這個鑰匙圈裡還沒有人可以編輯。<br>跟 Benson 說一聲，他那邊配一組給你。<br>'
         + '<button class="kr-peek-link" onclick="Keyring.retry()">他說配好了？再抓一次 ↻</button></div>';
     } else {
-      body = '<p class="kr-sub">選你自己，輸入密碼，這台裝置就記住了。</p><div class="kr-grid">'
+      body = '<p class="kr-sub">選自己、輸密碼，這台就記住了。</p><div class="kr-grid">'
         + ringUsers().map(function (u) {
-          return '<button class="kr-tile" style="background:' + grad(u.theme) + '" onclick="Keyring.pick(\'' + esc(u.id) + '\')">'
-            + '<span class="em">' + esc(u.emoji || "🧑") + '</span><span class="nm">' + esc(u.name) + '</span></button>';
+          /* 漸層從整塊磚退到 44px 頭像底色（tint），一列一個人 */
+          return '<button class="kr-tile" onclick="Keyring.pick(\'' + esc(u.id) + '\')">'
+            + '<span class="em" style="background:' + tint(u.theme) + '">' + esc(u.emoji || "🧑") + '</span>'
+            + '<span class="kr-tx"><span class="nm">' + esc(u.name) + '</span></span>'
+            + '<span class="go">›</span></button>';
         }).join("")
         + '</div>';
     }
     return '<div class="kr-grab"></div>'
       + '<div class="kr-head"><h3>誰在用？</h3><button class="kr-x" onclick="Keyring.close()" aria-label="關閉">✕</button></div>'
-      + whyBar() + body + peekBlock(true);
+      + whyBar() + body + peekBlock();
   }
   function sheetPw() {
     var u = ringUser(ui.userId) || { name: "", emoji: "🧑", theme: "sunset" };
@@ -375,9 +412,8 @@
       + (multi ? '<button class="kr-back" onclick="Keyring.backToWho()">‹ 換一個人</button>' : '<span></span>')
       + '<button class="kr-x" onclick="Keyring.close()" aria-label="關閉">✕</button></div>'
       + (ui.reason ? '<div class="kr-why">要「' + esc(ui.reason) + '」得先解鎖。</div>' : "")
-      + '<div class="kr-face" style="background:' + grad(u.theme) + '">' + esc(u.emoji || "🧑") + '</div>'
-      + '<div class="kr-title">嗨，' + esc(u.name) + '</div>'
-      + '<div class="kr-saytxt">輸入你的密碼，就可以編輯了</div>'
+      + '<div class="kr-id"><div class="kr-id-face" style="background:' + tint(u.theme) + '">' + esc(u.emoji || "🧑") + '</div>'
+      + '<div><b>' + esc(u.name) + '</b><span>輸入密碼就可以編輯</span></div></div>'
       + '<form onsubmit="return Keyring.submit(event)">'
       + '<div class="kr-field">'
       + '<input id="kr-pw" type="' + (ui.show ? "text" : "password") + '" inputmode="text" '
@@ -391,7 +427,7 @@
       + '<button class="kr-go" type="submit" ' + (ui.busy ? "disabled" : "") + '>'
       + (ui.busy ? '<span class="kr-spin"></span>解開中…' : '解鎖') + '</button>'
       + '</form>'
-      + peekBlock(false);
+      + peekBlock();
   }
 
   function pick(id) { ui.step = "pw"; ui.userId = id; ui.tries = 0; draw(); }
@@ -450,7 +486,7 @@
     if (!device) { open(""); return; }
     paint('<div class="kr-grab"></div>'
       + '<div class="kr-head"><h3>現在是你在用</h3><button class="kr-x" onclick="Keyring.close()" aria-label="關閉">✕</button></div>'
-      + '<div class="kr-id"><div class="kr-id-face" style="background:' + grad(device.theme) + '">' + esc(device.emoji || "🧑") + '</div>'
+      + '<div class="kr-id"><div class="kr-id-face" style="background:' + tint(device.theme) + '">' + esc(device.emoji || "🧑") + '</div>'
       + '<div><b>' + esc(device.name) + '</b><span>這台裝置記住了你的鑰匙，可以編輯</span></div></div>'
       + '<button class="kr-ghost" onclick="Keyring.askSwitch()" style="margin-bottom:10px">🔄 換人用</button>'
       + '<button class="kr-go" onclick="Keyring.close()">好，繼續用</button>');
@@ -472,9 +508,11 @@
   /* ---------------- 首頁 footer 的身分藥丸 ---------------- */
   function chipHtml() {
     if (!CFG.enabled) return "";
+    ensureStyle();   /* 宿主可能還沒開過 sheet，藥丸自己要保證有樣式 */
     if (device) {
+      /* 頭像一律用 tint（跟 sheet 裡的 44px 頭像同一種語言），不要用滿彩度的 grad */
       return '<button class="kr-chip on" onclick="Keyring.openIdentity()">'
-        + '<span class="kr-dot" style="background:' + grad(device.theme) + '">' + esc(device.emoji || "🧑") + '</span>'
+        + '<span class="kr-dot" style="background:' + tint(device.theme) + '">' + esc(device.emoji || "🧑") + '</span>'
         + esc(device.name) + '・可以編輯</button>';
     }
     return '<button class="kr-chip" onclick="Keyring.open(\'\')">🔒 只看看模式・點我解鎖</button>';
@@ -500,6 +538,7 @@
     Object.keys(opts || {}).forEach(function (k) { CFG[k] = opts[k]; });
     if (!CFG.ns) CFG.ns = "keyring." + (CFG.appId || "app") + ".";
     if (!CFG.enabled) return publicState();
+    ensureStyle();   /* 進站就注入：footer 身分藥丸在還沒開過 sheet 之前就要是對的樣子 */
     /* 本機救援用：想指到別份鑰匙圈（例如本機後台的預覽）就設 localStorage <ns>src */
     var override = lsGet(K("src"));
     if (override) CFG.url = override;

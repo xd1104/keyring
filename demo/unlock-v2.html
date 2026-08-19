@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>解鎖畫面 v2 — 三個方向</title>
+<style>
+:root{
+  --bg:#f7f4ee; --card:#ffffff; --ink:#2b2620; --muted:#8f8578; --line:#e8e1d5;
+  --acc:#ff6b5e; --acc-deep:#e2503f; --ok:#2fa87a; --bad:#d64545;
+  --shadow:0 2px 14px rgba(70,55,30,.08);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  background:#efeae0; color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  padding-bottom:40px;
+}
+h1,h2,h3,h4,p{margin:0;}
+button{font-family:inherit; border:none; background:none; cursor:pointer; color:inherit; padding:0;}
+
+/* ---------- 控制列 ---------- */
+.top{position:sticky; top:0; z-index:20; background:rgba(239,234,224,.94);
+  backdrop-filter:saturate(180%) blur(8px); border-bottom:1px solid #ded6c6; padding:12px 16px 10px;}
+.top h1{font-size:17px; font-weight:800;}
+.top .lede{font-size:13px; color:#7b7263; margin-top:4px; line-height:1.6; max-width:760px;}
+.ctrls{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; align-items:center;}
+.seg{display:inline-flex; background:#e2dbcb; border-radius:14px; padding:3px;}
+.seg button{min-height:44px; padding:0 14px; border-radius:11px; font-size:14.5px; font-weight:700; color:#7b7263;}
+.seg button.on{background:#fff; color:var(--ink); box-shadow:0 1px 4px rgba(0,0,0,.08);}
+.seg.tabs button.on{background:var(--ink); color:#fff;}
+.seg-lb{font-size:12.5px; font-weight:800; color:#9a9081; letter-spacing:.1em; align-self:center;}
+
+/* ---------- 舞台 ---------- */
+.stage{display:flex; gap:22px; padding:20px 16px 10px; overflow-x:auto; scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;}
+.col{flex:0 0 auto; width:375px; scroll-snap-align:center;}
+.colhead{display:flex; align-items:baseline; gap:8px; margin-bottom:10px; min-height:26px;}
+.colhead b{font-size:16px; font-weight:800;}
+.colhead .tagline{font-size:12.5px; color:#8a8072;}
+.badge{background:var(--acc); color:#fff; font-size:11.5px; font-weight:800; padding:3px 9px; border-radius:99px; white-space:nowrap;}
+.badge.grey{background:#cdc4b3; color:#5d554a;}
+
+/* 手機框 */
+.phone{width:375px; height:680px; position:relative; overflow:hidden; background:var(--bg);
+  border-radius:28px; border:1px solid #ded6c6; box-shadow:0 12px 34px rgba(70,55,30,.20);}
+
+/* ---------- 框裡的「真 App 內容」 ---------- */
+.ap{padding-bottom:30px;}
+.ap-head{padding:26px 20px 12px;}
+.ap-eyebrow{font-size:12px; letter-spacing:.22em; color:var(--muted); font-weight:700;}
+.ap-head h1{font-size:28px; font-weight:800; margin-top:6px;}
+.ap-head p{color:var(--muted); margin-top:6px; font-size:15px;}
+.ap-list{padding:8px 16px 4px; display:flex; flex-direction:column; gap:16px;}
+.trip-card{background:var(--card); border-radius:20px; overflow:hidden; box-shadow:var(--shadow); text-align:left;}
+.cover{min-height:110px; padding:18px; display:flex; align-items:flex-end; gap:12px; color:#fff;}
+.cover-emoji{font-size:44px; line-height:1; filter:drop-shadow(0 2px 6px rgba(0,0,0,.25));}
+.cover-txt h2{font-size:22px; font-weight:800; text-shadow:0 1px 8px rgba(0,0,0,.28);}
+.cover-txt div{font-size:13px; opacity:.95; margin-top:2px; text-shadow:0 1px 6px rgba(0,0,0,.3);}
+.trip-meta{padding:13px 18px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13.5px; color:var(--muted);}
+.count-chip{background:#fff1ef; color:var(--acc-deep); font-weight:700; font-size:12.5px; padding:5px 10px; border-radius:99px; white-space:nowrap;}
+.count-chip.now{background:#e8f6ef; color:var(--ok);}
+.ap-add{margin:16px; border:2px dashed #d8cfbf; border-radius:20px; min-height:64px; color:var(--muted);
+  font-size:16px; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px;}
+
+/* ---------- sheet 共用 ---------- */
+.scrim{position:absolute; inset:0; background:rgba(30,22,14,.45);}
+.sh{position:absolute; left:0; right:0; bottom:0; background:#fff; border-radius:22px 22px 0 0;
+  padding:14px 18px 22px; animation:up .3s cubic-bezier(.2,.8,.3,1);}
+@keyframes up{from{transform:translateY(40%); opacity:.4;} to{transform:none; opacity:1;}}
+.grab{width:38px; height:4px; border-radius:99px; background:#e4ddcf; margin:0 auto 10px;}
+.sh-head{display:flex; align-items:center; justify-content:space-between; gap:8px;}
+.sh-x{min-width:46px; min-height:46px; font-size:17px; color:var(--muted); display:flex; align-items:center; justify-content:center; margin-right:-10px;}
+.sh-back{min-height:44px; padding:0 10px 0 0; font-size:14.5px; font-weight:700; color:var(--muted);}
+.sh-err{background:#fbeeee; color:var(--bad); font-size:13.5px; font-weight:700; border-radius:12px; padding:10px 13px; margin-bottom:12px;}
+.sh-err span{display:block; font-weight:500; color:#a4655f; font-size:12.5px; margin-top:4px;}
+.fld{position:relative; margin-bottom:12px;}
+.fld input{width:100%; font-size:16px; font-family:inherit; color:var(--ink); padding:14px 52px 14px 14px;
+  border:1.5px solid var(--line); border-radius:13px; background:#fbfaf6; appearance:none;}
+.fld input:focus{outline:none; border-color:var(--acc);}
+.eye{position:absolute; right:3px; top:50%; transform:translateY(-50%); width:48px; height:48px;
+  display:flex; align-items:center; justify-content:center; font-size:17px; opacity:.65;}
+.chk{display:flex; align-items:center; gap:10px; min-height:48px; cursor:pointer; position:relative;}
+.chk input{position:absolute; opacity:0; width:1px; height:1px;}
+.box{width:26px; height:26px; border-radius:8px; border:2px solid #d6cbb8; background:#fbfaf6; flex:0 0 auto;
+  display:flex; align-items:center; justify-content:center; color:#fff; font-size:15px; font-weight:800;}
+.chk input:checked + .box{background:var(--acc); border-color:var(--acc);}
+.chk input:checked + .box::after{content:"\2713";}
+.chk-lb{font-size:15.5px; font-weight:600;}
+.chk-lb small{display:block; font-size:12.5px; color:var(--muted); font-weight:500; margin-top:2px;}
+.go{width:100%; min-height:52px; border-radius:15px; background:var(--acc); color:#fff; font-size:17px; font-weight:800;
+  display:flex; align-items:center; justify-content:center; margin-top:6px;}
+.go:active{background:var(--acc-deep);}
+.peek-link{min-height:44px; padding:0 14px; font-size:15px; font-weight:700; color:var(--muted);}
+
+/* ---------- 現況（照實作重畫） ---------- */
+.v-now .sh-head{margin-bottom:10px;}
+.v-now h3{font-size:19px; font-weight:800;}
+.v-now .sub{color:var(--muted); font-size:14px; margin:-4px 0 14px; line-height:1.55;}
+.v-now .grid{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+.v-now .tile{border-radius:18px; min-height:116px; padding:14px; color:#fff; text-align:left;
+  display:flex; flex-direction:column; justify-content:space-between;}
+.v-now .tile .em{font-size:34px; line-height:1; filter:drop-shadow(0 2px 6px rgba(0,0,0,.25));}
+.v-now .tile .nm{font-size:17px; font-weight:800; text-shadow:0 1px 8px rgba(0,0,0,.28);}
+.v-now .peek{margin-top:20px; padding-top:16px; border-top:1px solid #f2ecdf; text-align:center;}
+.v-now .peek p{font-size:13px; color:var(--muted); line-height:1.6;}
+.v-now .face{width:74px; height:74px; border-radius:22px; margin:2px auto 12px; display:flex;
+  align-items:center; justify-content:center; font-size:36px;}
+.v-now .ttl{text-align:center; font-size:21px; font-weight:800;}
+.v-now .say{text-align:center; font-size:13.5px; color:var(--muted); margin:6px 0 16px; line-height:1.55;}
+
+/* ---------- A：一行式 ---------- */
+.v-a h3{font-size:17px; font-weight:800;}
+.v-a .list{margin:6px -18px 0;}
+.v-a .row{width:100%; display:flex; align-items:center; gap:12px; padding:0 18px; min-height:60px;
+  border-top:1px solid #f2ecdf; text-align:left;}
+.v-a .row:active{background:#faf7f1;}
+.v-a .row b{flex:1; font-size:17px; font-weight:700;}
+.v-a .row i{font-style:normal; font-size:19px; color:#cfc5b3;}
+.v-a .foot{margin-top:6px; padding-top:8px; border-top:1px solid #f2ecdf; display:flex; justify-content:center;}
+.v-a .who-name{font-size:20px; font-weight:800; margin-top:2px;}
+.v-a .who-say{font-size:13.5px; color:var(--muted); margin:4px 0 14px;}
+
+/* ---------- B：暖卡列（推薦） ---------- */
+.v-b h3{font-size:18px; font-weight:800;}
+.v-b .sub{color:var(--muted); font-size:13.5px; margin:2px 0 12px;}
+.v-b .list{display:flex; flex-direction:column; gap:8px;}
+.v-b .row{width:100%; display:flex; align-items:center; gap:12px; text-align:left;
+  background:#fbf9f4; border:1px solid #efe9dd; border-radius:16px; padding:10px 12px; min-height:64px;}
+.v-b .row:active{background:#f5f1e8;}
+.v-b .av{width:44px; height:44px; border-radius:14px; display:flex; align-items:center; justify-content:center;
+  font-size:23px; flex:0 0 auto;}
+.v-b .tx{flex:1; min-width:0;}
+.v-b .tx b{display:block; font-size:16.5px; font-weight:700;}
+.v-b .tx span{display:block; font-size:12.5px; color:var(--muted); margin-top:2px;}
+.v-b .row i{font-style:normal; font-size:18px; color:#cfc5b3;}
+.v-b .foot{margin-top:10px; padding-top:6px; border-top:1px solid #f2ecdf; display:flex; justify-content:center;}
+.v-b .idrow{display:flex; align-items:center; gap:12px; padding:2px 0 14px;}
+.v-b .idrow b{display:block; font-size:18px;}
+.v-b .idrow span{display:block; font-size:13px; color:var(--muted); margin-top:2px;}
+
+/* ---------- C：兩顆按鈕 ---------- */
+.v-c h3{font-size:18px; font-weight:800;}
+.v-c .stack{display:flex; flex-direction:column; gap:10px; margin-top:8px;}
+.v-c .main{width:100%; min-height:54px; border-radius:15px; background:var(--acc); color:#fff;
+  font-size:17px; font-weight:800; display:flex; align-items:center; justify-content:center;}
+.v-c .main:active{background:var(--acc-deep);}
+.v-c .alt{width:100%; min-height:54px; border-radius:15px; border:1.5px solid var(--line); background:#fbfaf6;
+  font-size:17px; font-weight:700; display:flex; align-items:center; justify-content:center;}
+.v-c .foot{margin-top:12px; display:flex; justify-content:center;}
+.v-c .ttl{font-size:20px; font-weight:800; margin:4px 0 12px;}
+
+/* ---------- 欄位下方說明 ---------- */
+.note{margin-top:12px; background:#fff; border:1px solid #e4dccd; border-radius:16px; padding:13px 15px;}
+.note h4{font-size:13.5px; font-weight:800; margin-bottom:6px;}
+.note ul{margin:0; padding-left:17px; font-size:13px; line-height:1.75; color:#5f574c;}
+.note .con{color:#a06a4a;}
+.foot-tip{padding:6px 16px 0; font-size:12.5px; color:#8a8072; line-height:1.7;}
+.toast{position:fixed; left:50%; transform:translateX(-50%); bottom:24px; background:rgba(43,38,32,.94); color:#fff;
+  font-size:14px; font-weight:600; padding:11px 18px; border-radius:99px; z-index:40; transition:opacity .25s; opacity:0; pointer-events:none;}
+.toast.on{opacity:1;}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <h1>解鎖畫面 v2 — 三個方向</h1>
+  <p class="lede">左邊第一格是「現在這樣」，右邊三格是三個新方向。每一格都墊了真的 App 內容（旅程卡片＋暖米白底），因為問題正是「放進 App 裡才顯得不對」。上面切「選人／輸密碼／密碼錯了」可以同時比較。</p>
+  <div class="ctrls">
+    <span class="seg-lb">畫面</span>
+    <div class="seg" id="segStep">
+      <button data-step="who" class="on">選人</button>
+      <button data-step="pw">輸密碼</button>
+      <button data-step="err">密碼錯了</button>
+    </div>
+    <span class="seg-lb">跳到</span>
+    <div class="seg tabs" id="segTab">
+      <button data-go="now">現況</button>
+      <button data-go="a">A</button>
+      <button data-go="b">B ★</button>
+      <button data-go="c">C</button>
+    </div>
+  </div>
+</div>
+
+<div class="stage" id="stage"></div>
+<p class="foot-tip">手機上左右滑動可以換方向；電腦上四格並排直接比。密碼欄可以真的打字、眼睛可以切換、勾選也是真的。</p>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ====== 資料（假的，只為了看樣子） ====== */
+var THEMES = {
+  sunset:"linear-gradient(135deg,#ff8a80,#ff5f7e 55%,#c94b9d)",
+  ocean: "linear-gradient(135deg,#38c3a7,#2f8fd6)"
+};
+/* B 用的柔化版：同一組漸層，壓到 ~20% 疊在米白上 */
+var TINT = {
+  sunset:"linear-gradient(135deg,rgba(255,138,128,.24),rgba(201,75,157,.20))",
+  ocean: "linear-gradient(135deg,rgba(56,195,167,.24),rgba(47,143,214,.20))"
+};
+var USERS = [
+  {id:"benson", name:"Benson", emoji:"🧔", theme:"ocean",  last:true},
+  {id:"gf",     name:"女友", emoji:"👩", theme:"sunset", last:false}
+];
+var ME = USERS[1];            /* 輸密碼那步示範用「女友」，跟現況一致 */
+var STEP = "who";             /* who | pw | err */
+
+var VARIANTS = [
+  {key:"now", cls:"v-now", title:"現況", tag:"目前上線的樣子", badge:"現在這樣", grey:true,
+   pros:["兩塊 116px 的漸層磚，是 App 裡「一趟旅程」的視覺語言（旅程封面／回憶列都用它）。",
+         "用在「人」身上，等於把身分講成內容；而且一次出現兩塊滿彩度色塊，比 App 任何一個畫面都吵。",
+         "標題＋副標＋兩塊磚＋兩行 peek 說明＝同一件事講了四次，sheet 高 357px。"], con:true},
+
+  {key:"a", cls:"v-a", title:"A・一行式", tag:"大幅減法：沒有頭像、只有名字",
+   pros:["拿掉頭像磚、拿掉副標、把「不能改東西」併進連結文字裡。sheet 從 357px 掉到約 235px。",
+         "名字列直接抄 App 既有的回憶列（hairline 分隔＋› 箭頭），完全不新增視覺語言。",
+         "整個 sheet 只剩白＋墨色＋一顆珊瑚按鈕，後面的旅程封面重新變成畫面上最亮的東西。"],
+   cons:["兩個人只靠名字分辨，少了一眼認人的親切感（人多了會更明顯）。"]},
+
+  {key:"b", cls:"v-b", title:"B・暖卡列", tag:"留住人味，但把身分降到配角", rec:true,
+   pros:["頭像留著但縮到 44px、底色改成同一組漸層壓到 20%——認得出誰是誰，但不再是色塊。",
+         "橫向卡列，一列一個人，右邊可以掛一行小字（例：上次是這台用的），之後加人也不會爆版。",
+         "白 sheet ＋ 米白卡 ＋ 珊瑚只出現在按鈕，和 App 其他 sheet 同一種呼吸。sheet 約 265px。"],
+   cons:["比 A 多一層卡片，資訊量不是最少的。"]},
+
+  {key:"c", cls:"v-c", title:"C・兩顆按鈕", tag:"不選人，直接問「你是誰」",
+   pros:["把選人做成兩顆全寬按鈕，用 App 現成的主要／次要按鈕元件，零新元件。",
+         "有明確主次：這台裝置常用的那位是珊瑚色，其他人是外框鈕——一般情況一顆按鈕解決。",
+         "最像「一句話問完」，sheet 約 250px，操作目標最大最好按。"],
+   cons:["主次是猜的（要用上次解鎖的人來決定），猜錯時第二個人會覺得自己是次要的。","人一多按鈕會排成一長條。"]}
+];
+
+/* ====== 框裡的 App 背景 ====== */
+function appBg(){
+  return '<div class="ap">'
+    + '<div class="ap-head"><div class="ap-eyebrow">TRAVEL BOOK</div><h1>你的旅程</h1><p>兩趟進行中</p></div>'
+    + '<div class="ap-list">'
+    +   card(THEMES.sunset,"🗼","東京跨年","東京・箱根","12/28–01/03・7 天","進行中","now")
+    +   card(THEMES.ocean,"🏝️","沖繩放空","那霸・恩納","03/14–03/18・5 天","還有 24 天","")
+    + '</div>'
+    + '<div class="ap-add">＋ 開一趟新的</div>'
+    + '</div>';
+}
+function card(bg,em,nm,dest,meta,chip,cls){
+  return '<div class="trip-card"><div class="cover" style="background:'+bg+'">'
+    + '<span class="cover-emoji">'+em+'</span>'
+    + '<div class="cover-txt"><h2>'+nm+'</h2><div>'+dest+'</div></div></div>'
+    + '<div class="trip-meta"><span>'+meta+'</span><span class="count-chip '+cls+'">'+chip+'</span></div></div>';
+}
+
+/* ====== 共用片段 ====== */
+function grab(){ return '<div class="grab"></div>'; }
+function xBtn(){ return '<button class="sh-x" aria-label="關閉" onclick="say(\'demo：關掉\')">✕</button>'; }
+function backBtn(){ return '<button class="sh-back" onclick="setStep(\'who\')">‹ 換一個人</button>'; }
+function errBox(){
+  return STEP==="err"
+    ? '<div class="sh-err">密碼不對，再試一次<span>忘記的話跟 Benson 說，他可以重設。</span></div>' : "";
+}
+function pwField(k){
+  return '<div class="fld"><input id="pw-'+k+'" type="password" placeholder="密碼" autocomplete="off">'
+    + '<button class="eye" onclick="eye(\''+k+'\',this)" aria-label="顯示密碼">👁</button></div>';
+}
+function remember(k){
+  return '<label class="chk"><input type="checkbox" id="rm-'+k+'" checked><span class="box"></span>'
+    + '<span class="chk-lb">記住這台裝置<small>公用電腦就別勾</small></span></label>';
+}
+function goBtn(){ return '<button class="go" onclick="say(\'demo：這裡就解開了\')">解鎖</button>'; }
+function peekLink(txt){ return '<button class="peek-link" onclick="say(\'demo：進唯讀模式\')">'+txt+'</button>'; }
+
+/* ====== 現況 ====== */
+function shNow(){
+  if(STEP==="who"){
+    var tiles = USERS.map(function(u){
+      return '<button class="tile" style="background:'+THEMES[u.theme]+'" onclick="setStep(\'pw\')">'
+        + '<span class="em">'+u.emoji+'</span><span class="nm">'+u.name+'</span></button>';
+    }).join("");
+    return grab()
+      + '<div class="sh-head"><h3>誰在用？</h3>'+xBtn()+'</div>'
+      + '<p class="sub">選你自己，輸入密碼，這台裝置就記住了。</p>'
+      + '<div class="grid">'+tiles+'</div>'
+      + '<div class="peek"><p>不用密碼也能看，只是不能改東西。</p>'+peekLink("先看看就好 →")+'</div>';
+  }
+  return grab()
+    + '<div class="sh-head">'+backBtn()+xBtn()+'</div>'
+    + '<div class="face" style="background:'+THEMES[ME.theme]+'">'+ME.emoji+'</div>'
+    + '<div class="ttl">嗨，'+ME.name+'</div>'
+    + '<div class="say">輸入你的密碼，就可以編輯了</div>'
+    + errBox() + pwField("now") + remember("now") + goBtn()
+    + '<div class="peek" style="margin-top:14px; padding-top:10px;">'+peekLink("先看看就好 →")+'</div>';
+}
+
+/* ====== A：一行式 ====== */
+function shA(){
+  if(STEP==="who"){
+    var rows = USERS.map(function(u){
+      return '<button class="row" onclick="setStep(\'pw\')"><b>'+u.name+'</b><i>›</i></button>';
+    }).join("");
+    return grab()
+      + '<div class="sh-head"><h3>誰在用？</h3>'+xBtn()+'</div>'
+      + '<div class="list">'+rows+'</div>'
+      + '<div class="foot">'+peekLink("先看看就好（不能改東西）")+'</div>';
+  }
+  return grab()
+    + '<div class="sh-head">'+backBtn()+xBtn()+'</div>'
+    + '<div class="who-name">'+ME.name+'</div>'
+    + '<div class="who-say">輸入密碼就可以編輯</div>'
+    + errBox() + pwField("a") + remember("a") + goBtn()
+    + '<div class="foot">'+peekLink("先看看就好（不能改東西）")+'</div>';
+}
+
+/* ====== B：暖卡列 ====== */
+function shB(){
+  if(STEP==="who"){
+    var rows = USERS.map(function(u){
+      return '<button class="row" onclick="setStep(\'pw\')">'
+        + '<span class="av" style="background:'+TINT[u.theme]+'">'+u.emoji+'</span>'
+        + '<span class="tx"><b>'+u.name+'</b>'+(u.last?'<span>上次是這位用這台</span>':"")+'</span>'
+        + '<i>›</i></button>';
+    }).join("");
+    return grab()
+      + '<div class="sh-head"><h3>誰在用？</h3>'+xBtn()+'</div>'
+      + '<p class="sub">選自己、輸密碼，這台就記住了。</p>'
+      + '<div class="list">'+rows+'</div>'
+      + '<div class="foot">'+peekLink("先看看就好（不能改東西）")+'</div>';
+  }
+  return grab()
+    + '<div class="sh-head">'+backBtn()+xBtn()+'</div>'
+    + '<div class="idrow"><span class="av" style="background:'+TINT[ME.theme]+'">'+ME.emoji+'</span>'
+    + '<span><b>'+ME.name+'</b><span>輸入密碼就可以編輯</span></span></div>'
+    + errBox() + pwField("b") + remember("b") + goBtn()
+    + '<div class="foot">'+peekLink("先看看就好（不能改東西）")+'</div>';
+}
+
+/* ====== C：兩顆按鈕 ====== */
+function shC(){
+  if(STEP==="who"){
+    var btns = USERS.map(function(u,i){
+      return '<button class="'+(u.last?"main":"alt")+'" onclick="setStep(\'pw\')">我是 '+u.name+'</button>';
+    }).join("");
+    return grab()
+      + '<div class="sh-head"><h3>誰在用？</h3>'+xBtn()+'</div>'
+      + '<div class="stack">'+btns+'</div>'
+      + '<div class="foot">'+peekLink("先看看就好（不能改東西）")+'</div>';
+  }
+  return grab()
+    + '<div class="sh-head">'+backBtn()+xBtn()+'</div>'
+    + '<div class="ttl">'+ME.name+'，輸入密碼</div>'
+    + errBox() + pwField("c") + remember("c") + goBtn()
+    + '<div class="foot">'+peekLink("先看看就好（不能改東西）")+'</div>';
+}
+
+var SHEETS = {now:shNow, a:shA, b:shB, c:shC};
+
+/* ====== 繪製 ====== */
+function render(){
+  var html = VARIANTS.map(function(v){
+    var pros = v.pros.map(function(t){ return '<li>'+t+'</li>'; }).join("");
+    var cons = (v.cons||[]).map(function(t){ return '<li class="con">取捨：'+t+'</li>'; }).join("");
+    return '<section class="col" id="col-'+v.key+'">'
+      + '<div class="colhead"><b>'+v.title+'</b>'
+      +   (v.rec?'<span class="badge">★ 我推薦</span>':"")
+      +   (v.badge?'<span class="badge grey">'+v.badge+'</span>':"")
+      +   '<span class="tagline">'+v.tag+'</span></div>'
+      + '<div class="phone">'+appBg()+'<div class="scrim"></div>'
+      +   '<div class="sh '+v.cls+'">'+SHEETS[v.key]()+'</div></div>'
+      + '<div class="note"><h4>'+(v.con?"我看到的問題":"設計理由")+'</h4><ul>'+pros+cons+'</ul></div>'
+      + '</section>';
+  }).join("");
+  document.getElementById("stage").innerHTML = html;
+}
+function setStep(s){
+  STEP = s;
+  var bs = document.querySelectorAll("#segStep button");
+  for(var i=0;i<bs.length;i++){ bs[i].className = bs[i].getAttribute("data-step")===s ? "on" : ""; }
+  render();
+}
+function eye(k,btn){
+  var el = document.getElementById("pw-"+k);
+  if(!el) return;
+  el.type = el.type==="password" ? "text" : "password";
+  btn.style.opacity = el.type==="text" ? "1" : ".65";
+}
+var tmr;
+function say(t){
+  var el = document.getElementById("toast");
+  el.textContent = t; el.className = "toast on";
+  clearTimeout(tmr); tmr = setTimeout(function(){ el.className="toast"; }, 1500);
+}
+document.getElementById("segStep").addEventListener("click", function(e){
+  var b = e.target.closest("button"); if(b) setStep(b.getAttribute("data-step"));
+});
+document.getElementById("segTab").addEventListener("click", function(e){
+  var b = e.target.closest("button"); if(!b) return;
+  var bs = this.querySelectorAll("button");
+  for(var i=0;i<bs.length;i++) bs[i].className = "";
+  b.className = "on";
+  var col = document.getElementById("col-"+b.getAttribute("data-go"));
+  if(col) col.scrollIntoView({behavior:"smooth", inline:"center", block:"nearest"});
+});
+render();
+</script>
+</body>
+</html>
