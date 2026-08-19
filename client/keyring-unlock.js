@@ -188,6 +188,16 @@
         notify();
         return;
       }
+      /* 顯示用的資料（名字／emoji／顏色）在後台改過就跟著換。
+       * 解鎖時存的是當下的快照，不回頭對的話後台改名這邊永遠是舊的。
+       * 金鑰完全不動，所以不用重新輸密碼。 */
+      if (device.name !== u.name || device.emoji !== u.emoji || device.theme !== u.theme) {
+        device.name = u.name;
+        device.emoji = u.emoji;
+        device.theme = u.theme;
+        writeDevice(device);
+        notify();
+      }
       if (!device.k) return;
       return importKey(device.k)
         .then(function (key) { return decryptEntry(key, entry); })

@@ -1,11 +1,16 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-19T04:08:06.726Z",
+  "updatedAt": "2026-08-19T08:38:55.380Z",
   "apps": [
     {
       "id": "travel-book",
       "name": "旅途手帳",
       "emoji": "🧳"
+    },
+    {
+      "id": "recipe-book",
+      "name": "食譜本",
+      "emoji": "🍳"
     }
   ],
   "users": [
@@ -21,8 +26,8 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "Ou9MvIWs3ui/lvzA",
-          "cipher": "ahmfugYBaqnSE+f0xe+wW2sWpbFQVqmVr/aCfFaOJjXo02cezF6g6qbubByGThSo2lh6kxAjHtUcHY6TLT82JiD5KHB3L7o37lmwjwOl9sdcOoM3KRblTUJS0P37NJkW8j21uTZvw/F1wTFRMw=="
+          "iv": "P+JINn5LVF2hwLlk",
+          "cipher": "SqDQBoKF5yME7Qr67etVIqrxRaGk3zqKFtln8dtXvNC+wS0FgzBKbKrZx2pfSWiN7WySgZbXx91CA3vhaskv+3wgGywmhKvIwfv9leLkmSKnDYwfF25gNzmP8hTNEEDMQUSEo2ewOYbGJVhzwQ=="
         }
       }
     },
@@ -38,8 +43,8 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "95YV7PMxeA2OzWp0",
-          "cipher": "HE6bt9WXspQEmZSTvSMAchNC3auaRP9k0yQvw9c/dzjvb+XMt0+fLTg8mdRAl/9eudfjJVwkMLJpkGo86hAA8k1lHU+uPZjAsJUnSwpFYT8+FGUkhrbOEY5q3XQAw/ApvdCjnR74DyryUyBnJw=="
+          "iv": "XfmW5fS6g0Q24v/u",
+          "cipher": "kud32MT+PL+TKQOOBnMcxjvDX4DibZIRTBiMGFL9SMAWaOZKTXx4YhM0aW4W+B+QCWquDiZM5JG2vg2WurUeovbZVrJyBGO4LRp0hJmc0nLpLXJk4GSYPBc7mdC0u9vWQzGLgFQOQzvG0Ohaiw=="
         }
       }
     }
