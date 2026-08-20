@@ -421,10 +421,15 @@ async function handleApi(req, res, url) {
     const b = await readJson(req);
     const name = String(b.name || '').trim();
     if (!name) return sendJson(res, 400, { ok: false, message: '先幫他取個名字' });
-    const apps = Array.isArray(b.apps) ? b.apps.filter((x) => !!findApp(x)) : [];
+    /* 有送 apps 就完全照他勾的（包括「一個都不勾」＝真的收得掉）；
+     * 沒送＝新增使用者的預設＝所有 App 都給（他要管的只有成員）。
+     * 更新既有使用者時刻意不套這個預設，否則他取消的勾會被系統自己加回去。 */
+    const sent = Array.isArray(b.apps);
+    const apps = sent ? b.apps.filter((x) => !!findApp(x)) : S.apps.map((x) => x.id);
     let u = b.id ? findUser(b.id) : null;
     if (u) {
-      u.name = name; u.emoji = b.emoji || u.emoji; u.theme = b.theme || u.theme; u.apps = apps;
+      u.name = name; u.emoji = b.emoji || u.emoji; u.theme = b.theme || u.theme;
+      if (sent) u.apps = apps;
     } else {
       const pw = String(b.password || '');
       if (!pw) return sendJson(res, 400, { ok: false, message: '先設一組密碼給他' });
@@ -473,12 +478,36 @@ async function handleApi(req, res, url) {
       a.name = name; a.emoji = b.emoji || a.emoji; a.url = String(b.url || a.url || '');
       if (b.token) a.token = String(b.token).trim();
     } else {
-      const token = String(b.token || '').trim();
-      if (!token) return sendJson(res, 400, { ok: false, message: '要貼上金鑰才有東西可以發' });
+      /* 金鑰選填：Benson 的 App 都共用同一把，接新 App 不該再逼他貼一次。
+       * 沿用規則＝**最後一個有金鑰的 App 的那把**（＝他最近一次貼的）。
+       * 帶了 token 就照帶進來的（想拆開授權的能力沒有被拿掉）。 */
+      let token = String(b.token || '').trim();
+      if (!token) {
+        const donor = [...S.apps].reverse().find((x) => x.token);
+        if (!donor) {
+          return sendJson(res, 400, {
+            ok: false,
+            message: '這是第一個 App，還沒有任何金鑰可以沿用——這次要貼一把進來。之後再加 App 就會自動沿用這把了。',
+          });
+        }
+        token = donor.token;
+      }
       /* App id 是 Benson 自己填的代號（要跟該 App 前端的 appId 一致），一樣只收 ASCII */
-      const id = uniqueId(slugify(b.appId || name) || newId('app'), S.apps.map((x) => x.id));
+      const wanted = slugify(b.appId || name);
+      /* 同一個代號再登記一次，多半是打錯或忘了已經加過。以前會靜靜長出 xxx-2，
+       * 而那個 id 沒有任何 App 前端在用＝一筆沒用的殭屍。直接擋下來講清楚。 */
+      if (wanted && findApp(wanted)) {
+        return sendJson(res, 400, { ok: false,
+          message: '已經有一個代號叫「' + wanted + '」的 App 了。要改它的名字或金鑰請在那一列按「換金鑰」，不要重新登記一次。' });
+      }
+      const id = uniqueId(wanted || newId('app'), S.apps.map((x) => x.id));
       a = { id, name, emoji: b.emoji || '📦', url: String(b.url || ''), token };
       S.apps.push(a);
+      /* 他要管的只有成員：新 App 直接給所有現有使用者，要收再到「誰可以用」取消 */
+      S.users.forEach((u) => {
+        if (!Array.isArray(u.apps)) u.apps = [];
+        if (u.apps.indexOf(id) < 0) u.apps.push(id);
+      });
     }
     await commitChanges();
     return sendJson(res, 200, { ok: true, appId: a.id, state: viewState() });

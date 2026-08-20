@@ -358,19 +358,22 @@ function drawAppForm(){
     + '<div class="field"><span class="fl">圖示</span><div class="pickrow">'+picks+'</div></div>'
     + '<label class="field"><span class="fl">網址</span>'
     +   '<input id="af-url" placeholder="https://…" inputmode="url" autocapitalize="off" spellcheck="false"></label>'
-    + '<label class="field"><span class="fl">GitHub 金鑰</span>'
-    +   '<input id="af-key" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>'
-    + '<div class="hint">貼這一次就好，之後只會顯示前後幾個字。明文只留在這台電腦。</div>'
+    + '<label class="field"><span class="fl">GitHub 金鑰（選填）</span>'
+    +   '<input id="af-key" type="password" placeholder="留空就沿用現在這把" autocomplete="off" spellcheck="false"></label>'
+    + '<div class="hint">'+(S.apps.length
+        ? '留空就沿用現在這把（你的 App 都共用同一把）。要給這個 App 另一把才貼。'
+        : '這是第一個 App，先貼一把進來。之後再加 App 就會自動沿用這把。')
+      + '明文只留在這台電腦。</div>'
     + '<button class="btn-primary" onclick="saveApp(this)">登記</button>', "af-name");
 }
 function saveApp(btn){
   var n=($("af-name").value||"").trim(), id=($("af-id").value||"").trim();
   var u=($("af-url").value||"").trim(), k=($("af-key").value||"").trim();
   if(!n){ toast("先給它一個名字", "err"); return; }
-  if(!k){ toast("要貼上金鑰才有東西可以發", "err"); return; }
+  /* 金鑰留空＝沿用現在這把；一把都還沒有時由 server 回人話擋下來 */
   busy(btn, "登記中…");
   api("/apps","POST",{name:n, appId:id, emoji:formState.emoji, url:u, token:k})
-    .then(function(d){ applyState(d); closeSheet(); toast("登記好了，記得去勾誰可以用","ok"); })
+    .then(function(d){ applyState(d); closeSheet(); toast("登記好了，現有的人都已經可以用了","ok"); })
     .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="登記"; } });
 }
 function openKeyForm(id){
