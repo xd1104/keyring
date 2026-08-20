@@ -351,3 +351,207 @@ A 是安全備案（如果 Benson 要更靜）；C 適合「這台就是我的�
 **若改選 C**：`.kr-tile` 直接吃既有的 `.kr-go`（珊瑚）與 `.kr-ghost`（外框）樣式，`sheetWho()` 依 `keyring.device.userId`（上次解鎖的人）決定誰用 `.kr-go`；沒有上次紀錄時**全部用 `.kr-ghost`**，不要亂猜。
 
 **驗收線**：所有觸控目標 ≥44px、密碼 input `font-size:16px`（iOS 不自動放大）、第一步 sheet 高度 ≤280px、頭像底色與白底對比不得高到搶過旅程封面（肉眼比：sheet 打開時最亮的東西應該仍是後面的封面）。
+
+---
+
+# 解鎖畫面 v3「公版」（2026-08-20・lab-ux）
+
+> Demo：`demo/unlock-v3.html`（單檔零依賴、雙擊即開；同畫面並排手機 375 與電腦 1280）。
+> 狀態：**待 Benson 試玩拍板**。拍板後 lab-dev 才改 `client/keyring-unlock.js`。
+> **狀態機、流程、記住裝置、密碼顯示切換、唯讀入口、加解密全部不動**——這一輪只換版面與視覺。
+> 這一段推翻 v2.1 的部分決策（見 §7），改的時候要一起更新 travel-planner／recipe-book 的 CLAUDE.md。
+
+## 1. 這次要解的三件事
+
+1. **醜**：解鎖畫面在食譜本裡看起來不是「這個 App 的東西」，也不是「一個獨立的東西」，卡在中間。
+2. **不統一**：底部 sheet 的尺寸／密度會被每個宿主的內容影響，兩個 App 看起來就是兩樣。
+3. **半套主題化**（QA 抓到的技術根因）：`.kr-chip`／`.kr-why`／`.kr-err` 底色寫死粉色系（`#fff1ef`／`#fbeeee`），字卻吃 `--acc`。橘色 App 一接上去就是粉底＋橘字。**只要模組還有「一半吃變數、一半寫死」的顏色，接第 N 個 App 就會再壞一次。**
+
+## 2. 定案：B 案——自成一格的一層，所有 App 長得一模一樣
+
+**採 B（全螢幕暖夜色，跨 App 完全相同），不採 A（吃各 App 主色）。** 四個理由：
+
+1. **A 案的「統一」只到結構，B 案才是公版。** Benson 要的是「每個 web app 都套一樣的」，A 案每接一個新 App 都要調一次色，而且調不好就是這次的粉底＋橘字。
+2. **B 案從根上殺掉半套主題化**：滿版層一個 App 變數都不讀，就沒有「吃到一半」這種狀態。
+3. **語意對**：解鎖是「進 App 之前」的一層（像作業系統的登入畫面、Netflix 的選人頁），它本來就不該屬於任何一個 App 的視覺語言。v2 診斷出的「語意借錯層」在 A 案裡永遠有復發風險。
+4. **對比與可及性自己保證**：深底＋暖白字是模組自己控制的，不必猜宿主會給什麼底色。
+
+**但不是 Netflix 的純黑。** 底色用 **暖墨咖啡** `#1a1510`／`#1e1913` ＋頂部一層極淡暖光，跟他所有 App 的暖米白是同一個色溫的兩端（白天／關燈）。看起來是「同一家人，只是燈關了」，不是外來的黑箱。
+
+**滿版底層刻意不做到 100% 不透明**：`rgba(26,21,16,.955)` ＋ `backdrop-filter:blur(18px)`。後面的 App 內容還隱約看得到形狀但看不清細節 —— 同時滿足「像 Netflix 的滿版」與 v1 的核心洞見「你沒有離開 App」。不支援 backdrop-filter 的瀏覽器就是一片暖墨底，不會壞。
+
+**App 的身分靠文字不靠顏色**：左上角一行 `🧭 旅途手帳`（13px、次要色）。零調色成本、零撞色風險。
+
+## 3. 顏色歸屬（這是根治半套主題化的規則本身）
+
+| 層 | 誰決定顏色 | 規則 |
+|---|---|---|
+| 滿版解鎖層（`#kr-full` 內全部） | **模組**，寫死 | **一個宿主變數都不准讀**。連 `var(--acc, fallback)` 都不准，因為 fallback 一樣會造成半套 |
+| 使用者頭像 | **鑰匙圈**（`themes` 那五組漸層） | 顏色代表「人」，不代表 App。同一個人在每個 App 都是同一個顏色 |
+| 身分藥丸 `.kr-chip`（住在 App 畫面裡） | 模組定中性底，**只有前景吃 `--acc`** | **鐵律：主色只准上前景（文字／圖示／1px 框），底色永遠是模組固定的中性色。** 沒接變數時 fallback 也照樣好看 |
+
+模組內部用 `--krs-*` 前綴的變數當常數（定義在 `#kr-full` 上）。**這些是模組自己的，宿主不准設、模組也不讀宿主的同名變數。**
+
+```
+--krs-ink:#f7f2e8   --krs-mut:#a49a8c   --krs-line:rgba(255,255,255,.12)
+--krs-face:rgba(255,255,255,.055)       --krs-facehi:rgba(255,255,255,.10)
+--krs-btn:#f6efe1   --krs-btn-ink:#241e17
+--krs-err-bg:rgba(255,120,105,.14)  --krs-err-line:rgba(255,120,105,.30)  --krs-err-ink:#ffb3a6
+--krs-warn-bg:rgba(255,198,120,.13) --krs-warn-line:rgba(255,198,120,.28) --krs-warn-ink:#f2d5a1
+底：rgba(26,21,16,.955) + blur(18px)
+頂部暖光：radial-gradient(120% 70% at 50% -14%, rgba(255,203,140,.16), transparent 62%)
+```
+
+**要刪掉的寫死顏色**（就是這次的病灶）：`#fff1ef`（.kr-why）、`#fbeeee`（.kr-err／.kr-danger）、`#f3eee4`（.kr-chip.on）、`#fff6e3`／`#f2dcae`（.kr-warn）、`#fbf9f4`／`#efe9dd`（.kr-tile）、`#e4ddcf`（.kr-grab，元件本身也刪）。
+
+**新 App 接入要設定什麼：什麼都不用設。** 想讓身分藥丸的「點我解鎖」跟著 App 走，就設一個 `--acc`；不設就用模組預設 `#c1553f`。**這是唯一一個可選的鉤子。**
+
+## 4. 版面
+
+三段式 flex column，**全篇不用 `position:fixed` 的子元素**（鍵盤處理靠這個，見 §6）。
+
+```
+┌ .kr-top ───────────────────────────┐  flex:0 0 auto
+│ 🧭 旅途手帳              ✕(46px)   │  （第二步左邊換成「‹ 換一個人」）
+├ .kr-main > .kr-mid ────────────────┤  flex:1 1 auto; overflow-y:auto
+│                                    │  .kr-main 也是 flex column，
+│         （內容垂直置中）            │  .kr-mid 用 flex:1 0 auto ⇒
+│                                    │  內容短時置中、內容長時撐開可捲、不會截頂
+├ .kr-foot ──────────────────────────┤  flex:0 0 auto; border-top
+│      👀 先看看就好                  │
+│  不用密碼也能看，只是不能改東西      │
+└────────────────────────────────────┘
+```
+
+### 4-1 選人（`sheetWho` → `drawWho`）
+
+- 標題 `誰要編輯？`（25px/800，桌機 32px 置中）。**不要用「誰在用？」**——那句話暗示「你必須是其中一個」，「誰要編輯」才把「只想看」講成不用回答的問題。
+- 副標 `選自己、輸一次密碼，這台裝置就記住了。`
+- 理由條 `.kr-why`（被寫入動作叫出來時）：`要「規劃新旅程」得先解鎖，選一下你是誰就好。`
+- 人物磚 `.kr-tile`：flex wrap、`justify-content:center`、gap 10。
+  - 手機：`flex:0 0 calc(50% - 5px)`、`min-height:126px`、頭像 66px。
+  - **超過 6 人（`.kr-grid.many`）手機改 3 欄**、磚 112px、頭像 54px（8 人一屏看得完，這就是滿版的優勢所在）。
+  - 桌機（`min-width:900px`）：磚固定 `152px × 150px`、頭像 76px，wrap 置中；1 人／2 人／8 人都不會荒。
+- **頭像一律圓形＋滿彩度漸層**（見 §7 為什麼可以改回滿彩度）。`box-shadow` 用 `0 2px 10px rgba(0,0,0,.18)` ＋ `inset 0 0 0 1px rgba(255,255,255,.16)`。
+- 名字 `.kr-nm` 14.5px/700，`-webkit-line-clamp:2` ＋ `word-break:break-word`（長名字不爆版）。
+- **同名分辨（已知缺陷的解法）**：`.kr-hint` 12px 次要色小字，內容 = `u.hint`（後台新欄位，選填，例「手機那支」）；沒有 hint 但**名字在名單裡重複**時，退而顯示 `u.id`（ASCII slug，本來就唯一）。名字不重複又沒 hint 就不顯示。**這條純前端、不用資料遷移**；後台加 `hint` 欄位是加分項、可另開工單。
+
+### 4-2 輸密碼（`sheetPw` → `drawPw`）
+
+- 左上 `‹ 換一個人`（多人時），右上 ✕。
+- 置中身分區 `.kr-id`：66px 圓頭像 → `嗨，女友`（21px/800）→ `輸入密碼就可以編輯`（有 hint 時前綴 `手機那支・`）。
+- `.kr-field input`：**font-size 16px**、min-height 54、`padding:0 56px 0 16px`、底 `--krs-face`、框 `--krs-line`、字 `--krs-ink`、`::placeholder` 用 `--krs-mut` ＋ `opacity:1`（不設會被瀏覽器再打折變不可讀）。focus 框 `rgba(255,255,255,.45)`。
+- `.kr-eye` 48×48。
+- 錯誤條 `.kr-err`：第 1 次 `密碼不對，再試一次`；第 2 次起加第二行 `想不起來的話跟 Benson 說一聲，他那邊可以幫你換一組新的。`。**不做次數鎖定、不做倒數**（沒有伺服器，做了也是假的）。
+- `記住這台裝置` ＋小字，**預設勾選**；勾選框 26px、checked 時填 `--krs-btn`（暖白）＋深色勾。
+- 主鈕 `.kr-go`：**暖白底 `#f6efe1` ＋ 深色字**，54px、16.5px/800。**刻意不是珊瑚／橘**——那是 App 的顏色，這一層沒有 App 的顏色。送出中換 `⟳ 解開中…` ＋ disabled。
+- 原生 `<form>` ＋ `type=submit`（IME 組字不誤送）。
+
+### 4-3 已解鎖／換人（`openIdentity`／`askSwitch`）
+
+**也用滿版**，跟解鎖同一層語言（他要的是「統一介面」，不要一個滿版一個 sheet）。
+- 身分頁：66px 圓頭像＋名字＋`這台裝置記住了你的鑰匙，可以編輯`；主鈕 `好，繼續用`（暖白）在上、`🔄 換人用`（ghost）在下。**這一頁沒有 peek bar**（已經解鎖了，「先看看」沒有意義），✕ 就是出口。
+- 換人確認：`.kr-warn`（暖琥珀，dark-safe）＋ `清掉，換人`（danger）／`先不要`（ghost）。
+
+### 4-4 抓不到鑰匙圈（離線）
+
+滿版置中：`🌧️` 42px ＋ `現在拿不到鑰匙圈` / `可能是網路的關係。` / **`你已經看得到內容，只是暫時不能編輯。`**（這句一定要有——告訴他沒有壞掉）＋ `↻ 再抓一次`（ghost）。**peek bar 照樣在。**
+
+### 4-5 只有一個使用者
+
+沿用 v1 規則：`draw()` 發現只有 1 人就直接跳 `pw` 步驟、不顯示「‹ 換一個人」，但**仍顯示他的頭像與名字**。滿版下這一屏會很空 → 靠 `.kr-mid` 垂直置中 ＋ `.kr-wrap.narrow`（380／桌機 400）撐住，實測不空。
+
+## 5. 「先看看就好」怎麼在滿版下不被犧牲（硬性限制 1）
+
+**兩個出口，其中一個是版面的固定成員：**
+
+1. **底部 `.kr-foot` 常駐條**：`border-top` 分隔、全寬可點、62px 高、主文字 15.5px/700 `👀 先看看就好` ＋第二行 12.5px `不用密碼也能看，只是不能改東西`。它跟人物磚之間有明確的線，是畫面上**第二個焦點區**，不是角落的小連結。**每一屏（選人／輸密碼／離線）都要有。**
+2. **右上 ✕**（46px），關掉＝回到剛才在看的畫面。
+
+加上標題改成「誰**要編輯**？」，整屏的 framing 從「門禁（你是誰）」變成「可選的升級（要改東西的話選一下）」。**這是滿版沒有變成鎖屏的關鍵，改文案等於改掉這個設計。**
+
+首次進站 0.9 秒自動彈一次的規則不變（`introSeen`）。
+
+## 6. safe-area 與鍵盤（硬性限制 3）
+
+- **不用 `100vh`**。`#kr-full{height:100dvh; height:var(--kr-vh,100dvh);}`（`inset` 只寫 `left/top/right`，讓 height 生效）。
+- `--kr-vh` 由 `visualViewport` 維護：
+
+```js
+function fitVH(){
+  var vv = window.visualViewport, h = vv ? vv.height : window.innerHeight;
+  document.documentElement.style.setProperty("--kr-vh", h + "px");
+}
+// open() 時呼叫一次；listen visualViewport 的 resize 與 scroll，另加 window resize
+```
+
+  iOS 鍵盤彈出 → `--kr-vh` 縮小 → 整層跟著縮，內容不會被推到看不見的地方。
+
+- **`.kr-foot` 是 flex item 不是 `position:fixed`** ⇒ 鍵盤彈出時它自然停在鍵盤正上方，不會浮在鍵盤上、也不會被推出畫面。**這是刻意的，不要「優化」成 fixed。**
+- safe-area：
+  - `.kr-top` → `padding-top:calc(10px + env(safe-area-inset-top))`、左右 `max(14px, env(safe-area-inset-left/right))`
+  - `.kr-foot` → `padding-bottom:calc(6px + env(safe-area-inset-bottom))`（桌機 10px）
+  - `.kr-mid` 左右同樣吃 `max(18px, env(...))`（橫置時瀏海側不會壓字）
+- `open()` 時 `document.body.style.overflow="hidden"`，`close()` 還原（別用 `position:fixed` 鎖 body，會丟捲動位置）。
+
+## 7. 相對 v2.1 刻意反轉的兩點（別當 bug 修）
+
+| v2.1 規則 | v3 | 為什麼可以反轉 |
+|---|---|---|
+| 「別再把 `grad()` 用回頭像」，一律用 20% tint | **滿彩度漸層回來了** | v2.1 的理由是「滿彩漸層在這個 App 是一趟旅程的語言，會跟旅程封面撞」。**v3 的解鎖層是獨立的深色滿版，畫面上根本沒有旅程封面可以撞。** 而且深底上需要彩度才看得見人。另外加一道保險：**頭像一律圓形，旅程／菜色卡一律圓角矩形**——用形狀分語意，顏色就不必退讓 |
+| 身分藥丸的 `.kr-dot` 吃 tint | **`.kr-dot` 也改滿彩度、改圓形，22px** | 同一個人在解鎖畫面與藥丸要是同一個顏色；22px 圓點面積極小，不構成競爭 |
+
+反過來，**v2.1 的「提權不准綁宿主結構」這條完全保留並強化**（見 §8）。
+
+## 8. CSS 權重（硬性限制 2）
+
+- **滿版層內**：一律寫 `#kr-full .kr-x{}`（1,1,0）。這綁的是**模組自己的 id**，不是宿主結構，複製到任何 App 都成立，而且比宿主任何 class 選擇器都高。
+- **滿版層外**（只有身分藥丸）：`.kr-chip.kr-chip{}`（0,2,0），同一個 class 寫兩次。
+- **絕對禁止**：`.home-foot .kr-chip`、`#app .kr-chip` 這種綁宿主 DOM 的寫法。
+- 元素級 reset 也要有，且要靠 `#kr-full` 提權：
+
+```css
+#kr-full *{box-sizing:border-box;}
+#kr-full button{font-family:inherit; font-size:15px; border:none; background:none; cursor:pointer;
+                color:inherit; padding:0; margin:0; line-height:1.4; text-align:inherit;
+                -webkit-appearance:none; appearance:none;}
+#kr-full input{font-family:inherit; -webkit-appearance:none; appearance:none;}
+```
+
+  `.kr-chip` 自己要鎖死 `font-family / font-size / font-weight / line-height / letter-spacing / margin / padding / appearance / box-shadow / text-align`（它站在宿主 footer 裡，宿主什麼都可能滲進來）。
+- 樣式注入時機仍是 `init()`，不是第一次 `paint()`（藥丸每次進站都在）。
+
+## 9. class 對照表（lab-dev 照這張改）
+
+| 舊 | 新 | 動作 |
+|---|---|---|
+| `#kr-layer` `.kr-backdrop` `.kr-sheet` `.kr-grab` | `#kr-full` ＋ `.kr-top`／`.kr-main`／`.kr-mid`／`.kr-wrap`／`.kr-foot` | 換掉（sheet 與 grab bar 整個移除） |
+| `.kr-head` `.kr-head h3` | `.kr-top` ＋ `.kr-h`（標題移進 `.kr-wrap`，不在頂欄） | 換掉 |
+| `.kr-x` `.kr-back` | 同名保留 | 改樣式（深色版） |
+| `.kr-why` `.kr-sub` | 同名保留 | 改樣式，**去掉 `#fff1ef`** |
+| `.kr-grid` `.kr-tile` `.em` `.kr-tx` `.nm` `.go` | `.kr-grid`／`.kr-tile`／`.kr-av`／`.kr-tx`／`.kr-nm`／`.kr-hint`（`.go` 箭頭刪除） | 重寫成磚狀；新增 `.kr-grid.many`、`.kr-hint` |
+| `.kr-peek` `.kr-peek-link` | `.kr-peek`（單一按鈕，含 `<b>` ＋ `<span>` 兩行） | 合併重寫 |
+| `.kr-face` `.kr-title` `.kr-saytxt` `.kr-id-face` | 全部收斂成 `.kr-id` ＋ `.kr-av` | 刪除多餘的 |
+| `.kr-field` `.kr-eye` `.kr-err` `.kr-check` `.kr-box` `.kr-lb` `.kr-go` `.kr-ghost` `.kr-danger` `.kr-spin` `.kr-warn` `.kr-empty` | 同名保留 | 只改樣式（深色版），JS 不動 |
+| `.kr-chip` `.kr-dot` | 同名保留 ＋ 新增 `.kr-cta` | 中性底＋主色只上前景；dot 改圓形滿彩 |
+| — | `.kr-stack`（垂直按鈕組，gap 10） | 新增 |
+
+**JS 只要動這些**：`ensureDom()` 建 `#kr-full`（不是 layer+backdrop+sheet）、`paint()` 改成 `paint(topHtml, bodyHtml, footHtml, focusId)` 三段、`sheetWho()`／`sheetPw()`／`openIdentity()`／`askSwitch()` 的 template、新增 `fitVH()` ＋ `hintOf(u)`、`chipHtml()` 換 markup。**狀態機、`submit()`、加解密、`refreshFromRing()`、`writeDevice()`、`maybeIntro()` 一行都不要動。**
+
+## 10. 驗收線（lab-qa 照這個退件）
+
+1. **同一份模組在旅途手帳與食譜本裡，解鎖畫面的 computed style 必須逐項相同**（底色、字色、按鈕底色、圓角）——這是「公版」的機器定義。差一項就是半套主題化復發。
+2. `#kr-full` 子樹內**不得出現任何 `var(--acc`／`--acc-deep`／`--bad`／`--ink`／`--muted`／`--line`／`--card`／`--bg`**。用 `grep` 驗，不是用眼睛。
+3. 把模組丟進一個**沒設任何 CSS 變數的空白頁**，解鎖畫面要完全正常（demo 的「新 App（零設定）」情境就是這個測法）。
+4. **每個可互動元素實際量 computed style**（背景色、文字色、尺寸、圓角）——v2.0 那顆透明的解鎖鈕就是這樣漏掉的。特別量：`.kr-go` 的 `background-color` 必須是 `rgb(246,239,225)` 不是 `transparent`；`.kr-chip` 的 `background-color` 必須是 `rgb(246,242,234)`。
+5. 觸控目標 ≥44px：✕、👁、`.kr-back`、`.kr-peek`、`.kr-tile`、`.kr-chip`、勾選列。
+6. `#kr-pw` 的 `font-size` 必須是 `16px`。
+7. **每一屏（選人／輸密碼／密碼錯／離線）都要看得到「先看看就好」**。少一屏就退件。
+8. 375×667（小 iPhone）8 人不截頭、可捲到底；1280 寬 1 人不空洞。
+9. 鍵盤彈出時（或用 devtools 把 viewport 高度壓到 380px）解鎖鈕與 peek bar 仍在可視區內。
+
+## 11. 想請 Benson 拍板
+
+1. **B 案（推薦，demo 預設）vs A 案**——demo 上方切「配色方案」可以直接對照。
+2. **身分頁（已解鎖點藥丸）也用滿版**（推薦，統一）——還是那一頁維持小小的就好？
+3. **後台要不要加一個選填的「備註」欄位**（例：「手機那支」）解決同名分不出來？不加的話會顯示英文 id，能用但沒那麼漂亮。

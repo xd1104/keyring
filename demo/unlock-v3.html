@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>鑰匙圈解鎖 v3 — 跨 App 公版（可試玩）</title>
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:#efe9df; color:#2b2620;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  }
+  .bar{
+    position:sticky; top:0; z-index:5; background:#fffdf8; border-bottom:1px solid #e3dbcc;
+    padding:12px 16px 10px; box-shadow:0 2px 12px rgba(70,55,30,.06);
+  }
+  .bar h1{font-size:17px; margin:0 0 2px;}
+  .bar p{margin:0 0 10px; font-size:12.5px; color:#8f8578;}
+  .rows{display:flex; flex-wrap:wrap; gap:8px 18px;}
+  .grp{display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+  .grp > b{font-size:12px; color:#8f8578; font-weight:700; margin-right:2px;}
+  .grp button{
+    font-family:inherit; font-size:13px; font-weight:600; color:#5d554a; cursor:pointer;
+    background:#f6f2ea; border:1px solid #e3dbcc; border-radius:99px; padding:7px 12px; line-height:1;
+  }
+  .grp button.on{background:#2b2620; border-color:#2b2620; color:#fff;}
+  .grp button.hi{background:#fff2ee; border-color:#f3ccc4; color:#c14a38;}
+  .stages{display:flex; flex-wrap:wrap; gap:18px; padding:18px 16px 40px; align-items:flex-start;}
+  .stage h2{font-size:12.5px; margin:0 0 6px; color:#6b6154; font-weight:700;}
+  .stage h2 span{font-weight:500; color:#a2988a;}
+  .frame{background:#fff; border-radius:20px; box-shadow:0 6px 26px rgba(70,55,30,.16); overflow:hidden;}
+  .phone .frame{width:375px; height:720px;}
+  .desk .frameWrap{width:717px; height:426px; overflow:hidden; border-radius:14px; box-shadow:0 6px 26px rgba(70,55,30,.16);}
+  .desk .frame{width:1280px; height:760px; transform:scale(.56); transform-origin:top left; border-radius:0; box-shadow:none;}
+  iframe{border:0; display:block; width:100%; height:100%; background:#fff;}
+  .note{
+    margin:0 16px 40px; padding:14px 16px; background:#fffdf8; border:1px solid #e3dbcc;
+    border-radius:16px; font-size:13px; line-height:1.75; color:#5d554a; max-width:1120px;
+  }
+  .note b{color:#2b2620;}
+  .note code{background:#f2ece0; border-radius:6px; padding:1px 6px; font-size:12.5px;}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>🔑 鑰匙圈解鎖 v3 — 跨 App 公版</h1>
+  <p>左邊手機 375、右邊電腦 1280（縮成 56% 顯示）。兩邊各自獨立，都可以真的操作。密碼：Benson＝<b>1234</b>、其他人＝<b>abcd</b>（打錯會看到錯誤提示）。</p>
+  <div class="rows">
+    <div class="grp" id="g-app"><b>App</b></div>
+    <div class="grp" id="g-people"><b>使用者</b></div>
+    <div class="grp" id="g-mode"><b>配色方案</b></div>
+    <div class="grp" id="g-start"><b>進場</b></div>
+    <div class="grp"><button class="hi" onclick="render()">↻ 重置兩邊</button></div>
+  </div>
+</div>
+
+<div class="stages">
+  <div class="stage phone">
+    <h2>📱 手機 <span>375 × 720</span></h2>
+    <div class="frame"><iframe id="f-phone" title="手機預覽"></iframe></div>
+  </div>
+  <div class="stage desk">
+    <h2>💻 電腦 <span>1280 × 760，縮 56% 顯示</span></h2>
+    <div class="frameWrap"><div class="frame"><iframe id="f-desk" title="電腦預覽"></iframe></div></div>
+  </div>
+</div>
+
+<div class="note">
+  <b>要看什麼</b><br>
+  1. 切換上面的 <b>App</b>：底下那個 App 完全變了，但<b>解鎖畫面一個像素都沒變</b>——這就是「公版」。<br>
+  2. 切到 <b>A・吃 App 主色</b>：解鎖畫面會跟著 App 變色。比較看看哪一種比較像「一套統一介面」。<br>
+  3. 切到 <b>8 人</b>：滿版在人多的時候才看得出優勢（手機自動變 3 欄）。<br>
+  4. 切到 <b>兩個人同名</b>：名字下面會多一行小字分辨是誰。<br>
+  5. <b>「先看看就好」永遠在最下面那條</b>，而且右上角有 ✕——滿版不是鎖屏，隨時走得掉。<br>
+  6. 解鎖之後看 App 最下面的<b>身分藥丸</b>，點它可以換人。<br>
+  <br>
+  試玩流程：點藥丸 → 選人 → 故意打錯密碼 → 打對 → 看藥丸 → 點藥丸 → 換人 → 先看看就好。
+</div>
+
+<script>
+/* ====================== demo 舞台控制 ====================== */
+var APPS = {
+  travel: {
+    id:"travel-book", name:"旅途手帳", icon:"🧭",
+    bg:"#f7f4ee", ink:"#2b2620", muted:"#8f8578", line:"#e8e1d5",
+    acc:"#ff6b5e", accDeep:"#e2503f", soft:"#fff1ef",
+    headStyle:"plain",
+    items:[
+      {emoji:"🗼", grad:"linear-gradient(135deg,#ff8a80,#ff5f7e 55%,#c94b9d)", t:"東京五日", s:"4/12 出發・5 天"},
+      {emoji:"🏝️", grad:"linear-gradient(135deg,#38c3a7,#2f8fd6)", t:"沖繩跳島", s:"7/03 出發・4 天"},
+      {emoji:"⛰️", grad:"linear-gradient(135deg,#7ec96f,#3f9d8a)", t:"太魯閣", s:"9/20 出發・2 天"}
+    ]
+  },
+  recipe: {
+    id:"recipe-book", name:"食譜本", icon:"🍳",
+    bg:"#faf7f2", ink:"#2c241d", muted:"#8a7d70", line:"#e7ded2",
+    acc:"#D9702B", accDeep:"#B4551C", soft:"#fdeee2",
+    headStyle:"solid",
+    items:[
+      {emoji:"🍜", grad:"linear-gradient(135deg,#f5c65d,#f0855c)", t:"番茄牛肉麵", s:"主食・80 分鐘"},
+      {emoji:"🥗", grad:"linear-gradient(135deg,#7ec96f,#3f9d8a)", t:"凱撒沙拉", s:"沙拉・15 分鐘"},
+      {emoji:"🍰", grad:"linear-gradient(135deg,#ff8a80,#ff5f7e 55%,#c94b9d)", t:"檸檬磅蛋糕", s:"甜點・60 分鐘"}
+    ]
+  },
+  plain: {
+    id:"new-app", name:"新 App（沒設定任何色票）", icon:"📦",
+    bg:"#ffffff", ink:"#111111", muted:"#777777", line:"#e5e5e5",
+    acc:"", accDeep:"", soft:"#f3f3f3",
+    headStyle:"plain",
+    items:[
+      {emoji:"📄", grad:"linear-gradient(135deg,#6a7bf0,#8e54c9)", t:"還沒接色票的 App", s:"模組零設定就要能看"},
+      {emoji:"📄", grad:"linear-gradient(135deg,#38c3a7,#2f8fd6)", t:"第二筆資料", s:"—"}
+    ]
+  }
+};
+
+var PEOPLE = {
+  one: [
+    {id:"benson", name:"Benson", emoji:"🧑", theme:"ocean", pw:"1234"}
+  ],
+  two: [
+    {id:"benson", name:"Benson", emoji:"🧑", theme:"ocean", pw:"1234"},
+    {id:"girlfriend", name:"女友", emoji:"👩", theme:"sunset", pw:"abcd"}
+  ],
+  many: [
+    {id:"benson", name:"Benson", emoji:"🧑", theme:"ocean", pw:"1234"},
+    {id:"girlfriend", name:"女友", emoji:"👩", theme:"sunset", pw:"abcd"},
+    {id:"mom", name:"媽媽", emoji:"👩‍🦳", theme:"forest", pw:"abcd"},
+    {id:"dad", name:"爸爸", emoji:"👨", theme:"sand", pw:"abcd"},
+    {id:"sis", name:"妹妹", emoji:"👧", theme:"night", pw:"abcd"},
+    {id:"cousin", name:"表哥阿宏", emoji:"🧑‍🦱", theme:"ocean", pw:"abcd"},
+    {id:"colleague", name:"同事小李", emoji:"🧔", theme:"forest", pw:"abcd"},
+    {id:"livingroom", name:"客廳那台 iPad 給大家用", emoji:"📱", theme:"sand", pw:"abcd"}
+  ],
+  dupe: [
+    {id:"benson", name:"Benson", emoji:"🧑", theme:"ocean", pw:"1234"},
+    {id:"girlfriend", name:"女友", emoji:"👩", theme:"sunset", pw:"abcd", hint:"手機那支"},
+    {id:"girlfriend-pc", name:"女友", emoji:"👩", theme:"night", pw:"abcd"}
+  ],
+  offline: []
+};
+
+var STATE = { app:"travel", people:"two", mode:"b", start:"chip" };
+
+var CTRL = [
+  ["g-app", "app", [["travel","🧭 旅途手帳"],["recipe","🍳 食譜本"],["plain","📦 新 App（零設定）"]]],
+  ["g-people", "people", [["one","1 人"],["two","2 人"],["many","8 人"],["dupe","兩個人同名"],["offline","抓不到鑰匙圈"]]],
+  ["g-mode", "mode", [["b","B・公版深色（推薦）"],["a","A・吃 App 主色"]]],
+  ["g-start", "start", [["chip","未解鎖（點藥丸）"],["auto","首次進站自動彈"],["unlocked","已經解鎖了"]]]
+];
+
+function buildControls(){
+  CTRL.forEach(function(c){
+    var box = document.getElementById(c[0]);
+    c[2].forEach(function(o){
+      var b = document.createElement("button");
+      b.textContent = o[1];
+      b.dataset.k = c[1]; b.dataset.v = o[0];
+      b.onclick = function(){ STATE[c[1]] = o[0]; render(); };
+      box.appendChild(b);
+    });
+  });
+}
+function syncControls(){
+  CTRL.forEach(function(c){
+    var box = document.getElementById(c[0]);
+    Array.prototype.forEach.call(box.querySelectorAll("button"), function(b){
+      b.classList.toggle("on", STATE[b.dataset.k] === b.dataset.v);
+    });
+  });
+}
+
+function render(){
+  syncControls();
+  var cfg = {
+    app: APPS[STATE.app],
+    users: PEOPLE[STATE.people],
+    offline: STATE.people === "offline",
+    mode: STATE.mode,
+    start: STATE.start
+  };
+  var doc = buildDoc(cfg);
+  document.getElementById("f-phone").srcdoc = doc;
+  document.getElementById("f-desk").srcdoc = doc;
+}
+
+/* ====================== 被塞進 iframe 的那一份文件 ====================== */
+function buildDoc(cfg){
+  var a = cfg.app;
+  return '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
+  + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+  + '<style>'
+
+  /* ---------- 宿主 App 的樣式（每個 App 都不一樣，模擬真實環境） ---------- */
+  + ':root{--bg:' + a.bg + '; --ink:' + a.ink + '; --muted:' + a.muted + '; --line:' + a.line + ';'
+  + (a.acc ? ' --acc:' + a.acc + '; --acc-deep:' + a.accDeep + ';' : '')
+  + ' --a-soft:' + a.soft + ';}'
+  + '*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}'
+  + 'html,body{margin:0;padding:0;height:100%;}'
+  + 'body{background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;}'
+  /* 宿主自己的通則 —— 這就是會把注入樣式壓掉的東西（刻意留著當試驗場） */
+  + 'button{font-family:inherit; border:none; background:none; cursor:pointer; color:inherit; padding:0; font-size:13px;}'
+  + '.ap-foot button{background:#eee; color:#999; border-radius:4px; padding:4px 8px; font-weight:400;}'
+  + '#app{max-width:520px; margin:0 auto; min-height:100%; background:var(--bg); display:flex; flex-direction:column;}'
+  + '@media(min-width:900px){#app{max-width:860px;}}'
+  + '.ap-head{padding:26px 20px 12px;}'
+  + '.ap-head.solid{background:' + (a.acc || "#333") + '; color:#fff; padding:18px 20px;}'
+  + '.ap-head h1{margin:0; font-size:22px; font-weight:800;}'
+  + '.ap-head p{margin:4px 0 0; font-size:13px; color:var(--muted);}'
+  + '.ap-head.solid p{color:rgba(255,255,255,.85);}'
+  + '.ap-body{flex:1; padding:10px 16px 18px; display:flex; flex-direction:column; gap:10px;}'
+  + '@media(min-width:900px){.ap-body{display:grid; grid-template-columns:1fr 1fr; gap:14px;}}'
+  + '.ap-card{background:#fff; border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:0 2px 12px rgba(70,55,30,.07);}'
+  + '.ap-cover{height:86px; display:flex; align-items:center; justify-content:center; font-size:34px;}'
+  + '.ap-meta{padding:10px 14px 12px;}'
+  + '.ap-meta b{display:block; font-size:16px;}'
+  + '.ap-meta span{display:block; font-size:12.5px; color:var(--muted); margin-top:2px;}'
+  + '.ap-foot{border-top:1px solid var(--line); padding:12px 16px 18px; text-align:center;}'
+  + '.ap-links{margin-top:8px; font-size:12px; color:var(--muted);}'
+  + '.ap-toast{position:fixed; left:50%; bottom:78px; transform:translateX(-50%); background:#2b2620; color:#fff;'
+  + ' font-size:13.5px; padding:10px 16px; border-radius:99px; z-index:100001; max-width:86%; text-align:center;}'
+  + '.ap-toast[hidden]{display:none;}'
+
+  /* ---------- 鑰匙圈模組樣式（公版；提權只綁自家 id / 自家 class） ---------- */
+  + krCSS(cfg)
+  + '</style></head><body>'
+
+  + '<div id="app">'
+  +   '<header class="ap-head' + (a.headStyle === "solid" ? " solid" : "") + '">'
+  +     '<h1>' + a.icon + ' ' + a.name + '</h1><p>' + (a.headStyle === "solid" ? "共 12 道菜" : "3 趟旅程") + '</p>'
+  +   '</header>'
+  +   '<div class="ap-body">'
+  +     a.items.map(function(it){
+          return '<div class="ap-card"><div class="ap-cover" style="background:' + it.grad + '">' + it.emoji + '</div>'
+               + '<div class="ap-meta"><b>' + it.t + '</b><span>' + it.s + '</span></div></div>';
+        }).join("")
+  +   '</div>'
+  +   '<footer class="ap-foot"><div id="chipHost"></div><div class="ap-links">設定・重新整理・v3.0</div></footer>'
+  + '</div>'
+  + '<div class="ap-toast" id="toast" hidden></div>'
+  + '<div id="kr-full" hidden></div>'
+
+  + '<script>' + krJS(cfg) + '<\/script>'
+  + '</body></html>';
+}
+
+/* ---------------- 模組 CSS ---------------- */
+function krCSS(cfg){
+  var a = cfg.app;
+  return ''
+  /* 滿版容器：所有顏色都是模組自己的常數，不讀宿主的任何變數 */
+  + '#kr-full{position:fixed; left:0; top:0; right:0; z-index:99999;'
+  + ' height:100dvh; height:var(--kr-vh,100dvh);'
+  + ' display:flex; flex-direction:column;'
+  + ' --krs-ink:#f7f2e8; --krs-mut:#a49a8c; --krs-line:rgba(255,255,255,.12);'
+  + ' --krs-face:rgba(255,255,255,.055); --krs-facehi:rgba(255,255,255,.10);'
+  + ' --krs-btn:#f6efe1; --krs-btn-ink:#241e17;'
+  + ' --krs-err-bg:rgba(255,120,105,.14); --krs-err-line:rgba(255,120,105,.30); --krs-err-ink:#ffb3a6;'
+  + ' --krs-warn-bg:rgba(255,198,120,.13); --krs-warn-line:rgba(255,198,120,.28); --krs-warn-ink:#f2d5a1;'
+  + ' background:rgba(26,21,16,.955); -webkit-backdrop-filter:blur(18px); backdrop-filter:blur(18px);'
+  + ' color:var(--krs-ink); font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;'
+  + ' line-height:1.5; letter-spacing:normal; text-align:left;'
+  + ' animation:kr-in .24s cubic-bezier(.2,.8,.3,1);}'
+  + '#kr-full[hidden]{display:none;}'
+  + '#kr-full::before{content:""; position:absolute; inset:0; pointer-events:none;'
+  + ' background:radial-gradient(120% 70% at 50% -14%, rgba(255,203,140,.16), rgba(255,203,140,0) 62%);}'
+  + '@keyframes kr-in{from{opacity:0; transform:scale(1.02);} to{opacity:1; transform:none;}}'
+  + '@keyframes kr-sp{to{transform:rotate(360deg);}}'
+  + '#kr-full *{box-sizing:border-box;}'
+  + '#kr-full button{font-family:inherit; font-size:15px; border:none; background:none; cursor:pointer;'
+  + ' color:inherit; padding:0; margin:0; line-height:1.4; text-align:inherit; -webkit-appearance:none; appearance:none;}'
+  + '#kr-full input{font-family:inherit; -webkit-appearance:none; appearance:none;}'
+
+  /* A 案（demo 專用對照）：吃 App 主色的淺色版 */
+  + '#kr-full.mode-a{background:' + a.bg + '; -webkit-backdrop-filter:none; backdrop-filter:none;'
+  + ' --krs-ink:' + a.ink + '; --krs-mut:' + a.muted + '; --krs-line:' + a.line + ';'
+  + ' --krs-face:#fff; --krs-facehi:' + a.soft + ';'
+  + ' --krs-btn:' + (a.acc || "#333") + '; --krs-btn-ink:#fff;'
+  + ' --krs-err-bg:#fbeeee; --krs-err-line:#f0d4d0; --krs-err-ink:#c0392b;'
+  + ' --krs-warn-bg:#fff6e3; --krs-warn-line:#f2dcae; --krs-warn-ink:#8a5b12;'
+  + ' color:' + a.ink + ';}'
+  + '#kr-full.mode-a::before{display:none;}'
+  + '#kr-full.mode-a .kr-tile{border-color:' + a.line + ';}'
+  + '#kr-full.mode-a .kr-field input{background:#fff; border-color:' + a.line + '; color:' + a.ink + ';}'
+
+  /* 上／中／下三段：不用 position:fixed，鍵盤彈出時 footer 自然被推到鍵盤上方 */
+  + '#kr-full .kr-top{flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:10px;'
+  + ' width:100%; max-width:1120px; margin:0 auto; position:relative; z-index:1;'
+  + ' padding:calc(10px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 4px max(14px, env(safe-area-inset-left));}'
+  + '#kr-full .kr-app{font-size:13px; font-weight:700; color:var(--krs-mut); white-space:nowrap;'
+  + ' overflow:hidden; text-overflow:ellipsis;}'
+  + '#kr-full .kr-back{min-height:44px; padding:0 12px 0 0; font-size:14.5px; font-weight:700; color:var(--krs-mut);}'
+  + '#kr-full .kr-x{min-width:46px; min-height:46px; font-size:19px; color:var(--krs-mut); flex:0 0 auto;'
+  + ' border-radius:99px; display:flex; align-items:center; justify-content:center;}'
+  + '#kr-full .kr-x:hover{background:var(--krs-face); color:var(--krs-ink);}'
+  + '#kr-full .kr-main{flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch; position:relative; z-index:1;'
+  + ' display:flex; flex-direction:column;}'
+  + '#kr-full .kr-mid{flex:1 0 auto; display:flex; align-items:center; justify-content:center;'
+  + ' padding:6px max(18px, env(safe-area-inset-left)) 18px max(18px, env(safe-area-inset-right));}'
+  + '#kr-full .kr-wrap{width:100%; max-width:560px;}'
+  + '#kr-full .kr-wrap.narrow{max-width:380px;}'
+  + '#kr-full .kr-foot{flex:0 0 auto; border-top:1px solid var(--krs-line); position:relative; z-index:1;'
+  + ' padding:0 max(14px, env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-right));}'
+
+  /* 標題區 */
+  + '#kr-full .kr-h{font-size:25px; font-weight:800; margin:0 0 6px; letter-spacing:-.2px;}'
+  + '#kr-full .kr-sub{font-size:14.5px; color:var(--krs-mut); margin:0 0 18px; line-height:1.6;}'
+  + '#kr-full .kr-why{background:var(--krs-facehi); border:1px solid var(--krs-line); color:var(--krs-ink);'
+  + ' font-size:13.5px; font-weight:600; border-radius:13px; padding:11px 14px; margin:0 0 16px; line-height:1.55;}'
+
+  /* 選人磚：圓形頭像＝人（跟 App 裡方角的旅程／菜色卡分得開） */
+  + '#kr-full .kr-grid{display:flex; flex-wrap:wrap; gap:10px; justify-content:center;}'
+  + '#kr-full .kr-tile{flex:0 0 calc(50% - 5px); min-height:126px; display:flex; flex-direction:column;'
+  + ' align-items:center; justify-content:center; gap:9px; padding:14px 10px; border-radius:18px;'
+  + ' background:var(--krs-face); border:1px solid var(--krs-line); color:var(--krs-ink); text-align:center;'
+  + ' transition:background .14s, transform .14s;}'
+  + '#kr-full .kr-tile:hover{background:var(--krs-facehi);}'
+  + '#kr-full .kr-tile:active{transform:scale(.97);}'
+  + '#kr-full .kr-grid.many .kr-tile{flex:0 0 calc(33.333% - 7px); min-height:112px;}'
+  + '#kr-full .kr-grid.many .kr-av{width:54px; height:54px; font-size:25px;}'
+  + '#kr-full .kr-av{width:66px; height:66px; border-radius:50%; display:flex; align-items:center;'
+  + ' justify-content:center; font-size:30px; line-height:1; flex:0 0 auto;'
+  + ' box-shadow:0 2px 10px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,255,255,.16);}'
+  + '#kr-full .kr-tx{display:block; width:100%; min-width:0;}'
+  + '#kr-full .kr-nm{display:block; font-size:14.5px; font-weight:700; line-height:1.35; max-width:100%;'
+  + ' overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; word-break:break-word;}'
+  + '#kr-full .kr-hint{display:block; font-size:11.5px; font-weight:500; color:var(--krs-mut); margin-top:3px;'
+  + ' white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;}'
+
+  /* 「先看看就好」＝畫面第二個焦點，不是角落小連結 */
+  + '#kr-full .kr-peek{display:block; width:100%; min-height:62px; padding:10px 14px; border-radius:14px;'
+  + ' text-align:center; color:var(--krs-ink);}'
+  + '#kr-full .kr-peek:hover{background:var(--krs-face);}'
+  + '#kr-full .kr-peek b{display:block; font-size:15.5px; font-weight:700;}'
+  + '#kr-full .kr-peek span{display:block; font-size:12.5px; color:var(--krs-mut); margin-top:2px;}'
+
+  /* 身分列（輸密碼／已解鎖） */
+  + '#kr-full .kr-id{display:flex; flex-direction:column; align-items:center; text-align:center; gap:10px; margin:0 0 20px;}'
+  + '#kr-full .kr-id b{display:block; font-size:21px; font-weight:800;}'
+  + '#kr-full .kr-id span{display:block; font-size:13.5px; color:var(--krs-mut); margin-top:4px;}'
+
+  /* 密碼欄 */
+  + '#kr-full .kr-field{display:block; position:relative; margin:0 0 12px;}'
+  + '#kr-full .kr-field input{width:100%; min-height:54px; font-size:16px; font-weight:500; line-height:normal;'
+  + ' padding:0 56px 0 16px; border-radius:14px; border:1px solid var(--krs-line); background:var(--krs-face);'
+  + ' color:var(--krs-ink); outline:none;}'
+  + '#kr-full .kr-field input::placeholder{color:var(--krs-mut); opacity:1;}'
+  + '#kr-full .kr-field input:focus{border-color:rgba(255,255,255,.45); background:var(--krs-facehi);}'
+  + '#kr-full.mode-a .kr-field input:focus{border-color:' + (a.acc || "#333") + ';}'
+  + '#kr-full .kr-eye{position:absolute; right:3px; top:50%; transform:translateY(-50%); width:48px; height:48px;'
+  + ' display:flex; align-items:center; justify-content:center; font-size:17px; border-radius:12px;}'
+  + '#kr-full .kr-err{background:var(--krs-err-bg); border:1px solid var(--krs-err-line); color:var(--krs-err-ink);'
+  + ' font-size:13.5px; font-weight:700; border-radius:13px; padding:11px 14px; margin:0 0 12px; line-height:1.5;}'
+  + '#kr-full .kr-err span{display:block; font-weight:500; font-size:12.5px; margin-top:4px; opacity:.85;}'
+  + '#kr-full .kr-warn{background:var(--krs-warn-bg); border:1px solid var(--krs-warn-line); color:var(--krs-warn-ink);'
+  + ' font-size:13.5px; border-radius:14px; padding:12px 14px; margin:0 0 16px; line-height:1.6;}'
+
+  /* 勾選 */
+  + '#kr-full .kr-check{display:flex; align-items:center; gap:11px; min-height:50px; cursor:pointer; position:relative; text-align:left;}'
+  + '#kr-full .kr-check input{position:absolute; opacity:0; width:1px; height:1px; margin:0;}'
+  + '#kr-full .kr-box{width:26px; height:26px; border-radius:8px; border:1.5px solid var(--krs-mut);'
+  + ' background:transparent; flex:0 0 auto; display:flex; align-items:center; justify-content:center;'
+  + ' font-size:15px; color:var(--krs-btn-ink); line-height:1;}'
+  + '#kr-full .kr-check input:checked + .kr-box{background:var(--krs-btn); border-color:var(--krs-btn);}'
+  + '#kr-full .kr-check input:checked + .kr-box::after{content:"\\2713";}'
+  + '#kr-full .kr-lb{font-size:15px; font-weight:600;}'
+  + '#kr-full .kr-lb small{display:block; font-size:12.5px; color:var(--krs-mut); font-weight:500; margin-top:2px; line-height:1.5;}'
+
+  /* 按鈕 */
+  + '#kr-full .kr-go{width:100%; min-height:54px; border-radius:15px; background:var(--krs-btn);'
+  + ' color:var(--krs-btn-ink); font-size:16.5px; font-weight:800; display:flex; align-items:center;'
+  + ' justify-content:center; gap:9px; margin-top:6px;}'
+  + '#kr-full .kr-go[disabled]{opacity:.66;}'
+  + '#kr-full .kr-ghost{width:100%; min-height:54px; border-radius:15px; border:1px solid var(--krs-line);'
+  + ' background:var(--krs-face); color:var(--krs-ink); font-size:16px; font-weight:700; display:flex;'
+  + ' align-items:center; justify-content:center; gap:8px;}'
+  + '#kr-full .kr-danger{width:100%; min-height:54px; border-radius:15px; background:var(--krs-err-bg);'
+  + ' border:1px solid var(--krs-err-line); color:var(--krs-err-ink); font-size:16px; font-weight:700;'
+  + ' display:flex; align-items:center; justify-content:center;}'
+  + '#kr-full .kr-spin{width:17px; height:17px; border-radius:50%; border:2.5px solid rgba(0,0,0,.22);'
+  + ' border-top-color:var(--krs-btn-ink); animation:kr-sp .7s linear infinite;}'
+  + '#kr-full .kr-empty{text-align:center; font-size:15px; color:var(--krs-mut); line-height:1.85;}'
+  + '#kr-full .kr-empty .big{font-size:42px; display:block; margin-bottom:10px;}'
+  + '#kr-full .kr-stack{display:flex; flex-direction:column; gap:10px; margin-top:18px;}'
+
+  /* 電腦版：置中一欄、磚變小顆橫排，畫面不會變荒原 */
+  + '@media(min-width:900px){'
+  +   '#kr-full .kr-h{font-size:32px; text-align:center;}'
+  +   '#kr-full .kr-sub{font-size:15.5px; text-align:center; margin-bottom:26px;}'
+  +   '#kr-full .kr-why{text-align:center;}'
+  +   '#kr-full .kr-wrap{max-width:700px;}'
+  +   '#kr-full .kr-wrap.narrow{max-width:400px;}'
+  +   '#kr-full .kr-tile{flex:0 0 152px; min-height:150px;}'
+  +   '#kr-full .kr-grid.many .kr-tile{flex:0 0 152px; min-height:150px;}'
+  +   '#kr-full .kr-grid.many .kr-av{width:76px; height:76px; font-size:34px;}'
+  +   '#kr-full .kr-av{width:76px; height:76px; font-size:34px;}'
+  +   '#kr-full .kr-nm{font-size:15px;}'
+  +   '#kr-full .kr-foot{padding-bottom:calc(10px + env(safe-area-inset-bottom));}'
+  +   '#kr-full .kr-peek{max-width:520px; margin:0 auto;}'
+  + '}'
+
+  /* ---------- 身分藥丸：住在 App 裡，所以只有它是可以吃主色的 ---------- */
+  /* 提權用「同一個 class 寫兩次」，不准綁宿主結構 */
+  + '.kr-chip.kr-chip{display:inline-flex; align-items:center; gap:9px; min-height:44px; padding:0 15px;'
+  + ' border-radius:99px; background:#f6f2ea; border:1px solid #e6dfd2; color:#5d554a;'
+  + ' font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;'
+  + ' font-size:13.5px; font-weight:700; line-height:1.3; cursor:pointer; margin:0; letter-spacing:normal;'
+  + ' -webkit-appearance:none; appearance:none; text-align:left; box-shadow:none;}'
+  + '.kr-chip.kr-chip .kr-dot{width:22px; height:22px; border-radius:50%; flex:0 0 auto; display:flex;'
+  + ' align-items:center; justify-content:center; font-size:12px; line-height:1;'
+  + ' box-shadow:inset 0 0 0 1px rgba(255,255,255,.35);}'
+  /* 主色只准上前景（文字／圖示／1px 框），底色永遠是模組固定的中性色 */
+  + '.kr-chip.kr-chip .kr-cta{color:var(--acc,#c1553f); font-weight:800;}'
+  + '.kr-chip.kr-chip:hover{background:#f1ece2;}';
+}
+
+/* ---------------- 模組 JS（demo 版：沒有真的加解密） ---------------- */
+function krJS(cfg){
+  return ''
+  + 'var GRAD={sunset:"linear-gradient(135deg,#ff8a80,#ff5f7e 55%,#c94b9d)",'
+  + 'ocean:"linear-gradient(135deg,#38c3a7,#2f8fd6)",'
+  + 'night:"linear-gradient(135deg,#6a7bf0,#8e54c9)",'
+  + 'forest:"linear-gradient(135deg,#7ec96f,#3f9d8a)",'
+  + 'sand:"linear-gradient(135deg,#f5c65d,#f0855c)"};'
+  + 'var APPNAME=' + JSON.stringify(cfg.app.icon + " " + cfg.app.name) + ';'
+  + 'var USERS=' + JSON.stringify(cfg.users) + ';'
+  + 'var MODE=' + JSON.stringify(cfg.mode) + ';'
+  + 'var OFFLINE=' + (cfg.offline ? "true" : "false") + ';'
+  + 'var START=' + JSON.stringify(cfg.start) + ';'
+  + 'var dev=null;'
+  + 'var ui={open:false,step:"who",userId:null,tries:0,show:false,remember:true,reason:"",busy:false,view:"unlock"};'
+
+  + 'function esc(s){return String(s==null?"":s).replace(/[&<>"\']/g,function(c){'
+  + 'return {"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;","\'":"&#39;"}[c];});}'
+  + 'function grad(t){return GRAD[t]||GRAD.sunset;}'
+  + 'function toast(m){var t=document.getElementById("toast");t.textContent=m;t.hidden=false;'
+  + 'clearTimeout(window._tt);window._tt=setTimeout(function(){t.hidden=true;},2200);}'
+
+  /* 同名的人才顯示副標，副標優先用後台填的 hint，沒有就用 id */
+  + 'function hintOf(u){if(u.hint)return u.hint;'
+  + 'var dup=USERS.filter(function(x){return x.name===u.name;}).length>1;'
+  + 'return dup?u.id:"";}'
+
+  + 'function fitVH(){var vv=window.visualViewport;var h=vv?vv.height:window.innerHeight;'
+  + 'document.documentElement.style.setProperty("--kr-vh",h+"px");}'
+
+  + 'function layer(){return document.getElementById("kr-full");}'
+  + 'function paint(top,body,foot,focusId){'
+  + 'var el=layer();'
+  + 'el.className=(MODE==="a"?"mode-a":"");'
+  + 'el.innerHTML=\'<div class="kr-top">\'+top+\'</div>\''
+  + '+\'<div class="kr-main"><div class="kr-mid">\'+body+\'</div></div>\''
+  + '+(foot?\'<div class="kr-foot">\'+foot+\'</div>\':"");'
+  + 'el.hidden=false;document.body.style.overflow="hidden";fitVH();'
+  + 'if(focusId)setTimeout(function(){var i=document.getElementById(focusId);if(i)i.focus();},70);}'
+
+  + 'function topBar(left){return (left||\'<div class="kr-app">\'+esc(APPNAME)+\'</div>\')'
+  + '+\'<button class="kr-x" onclick="KR.close()" aria-label="關閉">✕</button>\';}'
+  + 'function peekBar(){return \'<button class="kr-peek" onclick="KR.peek()">\''
+  + '+\'<b>👀 先看看就好</b><span>不用密碼也能看，只是不能改東西</span></button>\';}'
+
+  + 'function drawWho(){'
+  + 'if(OFFLINE){return paint(topBar(),\'<div class="kr-wrap narrow"><div class="kr-empty">\''
+  + '+\'<span class="big">🌧️</span>現在拿不到鑰匙圈<br>可能是網路的關係。<br>你已經看得到內容，只是暫時不能編輯。\''
+  + '+\'<div class="kr-stack"><button class="kr-ghost" onclick="KR.retry()">↻ 再抓一次</button></div>\''
+  + '+\'</div></div>\',peekBar());}'
+  + 'if(USERS.length===1){ui.step="pw";ui.userId=USERS[0].id;return drawPw();}'
+  + 'var many=USERS.length>6;'
+  + 'var tiles=USERS.map(function(u){var h=hintOf(u);'
+  + 'return \'<button class="kr-tile" onclick="KR.pick(\\\'\'+esc(u.id)+\'\\\')">\''
+  + '+\'<span class="kr-av" style="background:\'+grad(u.theme)+\'">\'+esc(u.emoji||"🧑")+\'</span>\''
+  + '+\'<span class="kr-tx"><span class="kr-nm">\'+esc(u.name)+\'</span>\''
+  + '+(h?\'<span class="kr-hint">\'+esc(h)+\'</span>\':"")+\'</span></button>\';}).join("");'
+  + 'var body=\'<div class="kr-wrap">\''
+  + '+\'<h2 class="kr-h">誰要編輯？</h2>\''
+  + '+\'<p class="kr-sub">選自己、輸一次密碼，這台裝置就記住了。</p>\''
+  + '+(ui.reason?\'<div class="kr-why">要「\'+esc(ui.reason)+\'」得先解鎖，選一下你是誰就好。</div>\':"")'
+  + '+\'<div class="kr-grid\'+(many?" many":"")+\'">\'+tiles+\'</div></div>\';'
+  + 'paint(topBar(),body,peekBar());}'
+
+  + 'function drawPw(){'
+  + 'var u=USERS.filter(function(x){return x.id===ui.userId;})[0]||{name:"",emoji:"🧑",theme:"sunset"};'
+  + 'var multi=USERS.length>1;'
+  + 'var err=ui.tries>0?\'<div class="kr-err">密碼不對，再試一次\''
+  + '+(ui.tries>=2?\'<span>想不起來的話跟 Benson 說一聲，他那邊可以幫你換一組新的。</span>\':"")+\'</div>\':"";'
+  + 'var h=hintOf(u);'
+  + 'var body=\'<div class="kr-wrap narrow">\''
+  + '+(ui.reason?\'<div class="kr-why">要「\'+esc(ui.reason)+\'」得先解鎖。</div>\':"")'
+  + '+\'<div class="kr-id"><span class="kr-av" style="background:\'+grad(u.theme)+\'">\'+esc(u.emoji||"🧑")+\'</span>\''
+  + '+\'<div><b>嗨，\'+esc(u.name)+\'</b><span>\'+(h?esc(h)+\'・\':"")+\'輸入密碼就可以編輯</span></div></div>\''
+  + '+\'<form onsubmit="return KR.submit(event)">\''
+  + '+\'<div class="kr-field"><input id="kr-pw" type="\'+(ui.show?"text":"password")+\'" \''
+  + '+\'autocomplete="current-password" autocapitalize="off" spellcheck="false" placeholder="你的密碼">\''
+  + '+\'<button type="button" class="kr-eye" onclick="KR.toggleShow()" aria-label="顯示密碼">\'+(ui.show?"🙈":"👁")+\'</button></div>\''
+  + '+err'
+  + '+\'<label class="kr-check"><input type="checkbox" id="kr-rm" \'+(ui.remember?"checked":"")+\'>\''
+  + '+\'<span class="kr-box"></span><span class="kr-lb">記住這台裝置<small>下次打開就直接能編輯。別人的電腦記得取消。</small></span></label>\''
+  + '+\'<button class="kr-go" type="submit" \'+(ui.busy?"disabled":"")+\'>\''
+  + '+(ui.busy?\'<span class="kr-spin"></span>解開中…\':"解鎖")+\'</button></form></div>\';'
+  + 'var left=multi?\'<button class="kr-back" onclick="KR.backToWho()">‹ 換一個人</button>\':null;'
+  + 'paint(topBar(left),body,peekBar(),"kr-pw");}'
+
+  + 'function draw(){if(ui.view==="id")return drawId();if(ui.view==="switch")return drawSwitch();'
+  + 'return ui.step==="who"?drawWho():drawPw();}'
+
+  + 'function drawId(){'
+  + 'var body=\'<div class="kr-wrap narrow">\''
+  + '+\'<div class="kr-id"><span class="kr-av" style="background:\'+grad(dev.theme)+\'">\'+esc(dev.emoji)+\'</span>\''
+  + '+\'<div><b>\'+esc(dev.name)+\'</b><span>這台裝置記住了你的鑰匙，可以編輯</span></div></div>\''
+  + '+\'<div class="kr-stack"><button class="kr-go" onclick="KR.close()">好，繼續用</button>\''
+  + '+\'<button class="kr-ghost" onclick="KR.askSwitch()">🔄 換人用</button></div></div>\';'
+  + 'paint(topBar(),body,null);}'
+
+  + 'function drawSwitch(){'
+  + 'var body=\'<div class="kr-wrap narrow">\''
+  + '+\'<h2 class="kr-h">要換人嗎？</h2>\''
+  + '+\'<div class="kr-warn">換人會把這台裝置記住的鑰匙清掉，回到「只看看」。下一個人自己選名字、輸密碼就好。</div>\''
+  + '+\'<div class="kr-stack"><button class="kr-danger" onclick="KR.doSwitch()">清掉，換人</button>\''
+  + '+\'<button class="kr-ghost" onclick="KR.openIdentity()">先不要</button></div></div>\';'
+  + 'paint(topBar(),body,null);}'
+
+  + 'function chip(){'
+  + 'var host=document.getElementById("chipHost");'
+  + 'if(dev){host.innerHTML=\'<button class="kr-chip" onclick="KR.openIdentity()">\''
+  + '+\'<span class="kr-dot" style="background:\'+grad(dev.theme)+\'"></span>\'+esc(dev.name)+\'・可以編輯</button>\';}'
+  + 'else{host.innerHTML=\'<button class="kr-chip" onclick="KR.open(\\\'\\\')">🔒 只看看模式・\''
+  + '+\'<span class="kr-cta">點我解鎖 ›</span></button>\';}}'
+
+  + 'var KR={'
+  + 'open:function(reason){ui.open=true;ui.view="unlock";ui.step="who";ui.userId=null;ui.tries=0;'
+  + 'ui.show=false;ui.busy=false;ui.reason=reason||"";draw();},'
+  + 'close:function(){ui.open=false;layer().hidden=true;document.body.style.overflow="";},'
+  + 'peek:function(){KR.close();toast("好，就先看看。想編輯再點最下面那條");},'
+  + 'retry:function(){OFFLINE=false;USERS=USERS.length?USERS:[{id:"benson",name:"Benson",emoji:"🧑",theme:"ocean",pw:"1234"}];draw();},'
+  + 'pick:function(id){ui.step="pw";ui.userId=id;ui.tries=0;ui.show=false;draw();},'
+  + 'backToWho:function(){ui.step="who";ui.userId=null;draw();},'
+  + 'toggleShow:function(){var i=document.getElementById("kr-pw");var v=i?i.value:"";'
+  + 'var r=document.getElementById("kr-rm");ui.remember=r?r.checked:true;ui.show=!ui.show;draw();'
+  + 'var n=document.getElementById("kr-pw");if(n){n.value=v;n.focus();}},'
+  + 'submit:function(e){if(e&&e.preventDefault)e.preventDefault();if(ui.busy)return false;'
+  + 'var i=document.getElementById("kr-pw");var pw=i?i.value:"";'
+  + 'var r=document.getElementById("kr-rm");ui.remember=r?r.checked:true;'
+  + 'if(!pw){toast("先輸入密碼喔");return false;}'
+  + 'var u=USERS.filter(function(x){return x.id===ui.userId;})[0];'
+  + 'ui.busy=true;draw();'
+  + 'setTimeout(function(){ui.busy=false;'
+  + 'if(u&&pw===u.pw){dev={userId:u.id,name:u.name,emoji:u.emoji,theme:u.theme};'
+  + 'KR.close();chip();toast("解開了，"+u.name+" 現在可以編輯 🎉");}'
+  + 'else{ui.tries++;draw();var n=document.getElementById("kr-pw");if(n){n.value="";n.focus();}}},620);'
+  + 'return false;},'
+  + 'openIdentity:function(){if(!dev)return KR.open("");ui.open=true;ui.view="id";draw();},'
+  + 'askSwitch:function(){ui.view="switch";draw();},'
+  + 'doSwitch:function(){dev=null;chip();toast("已經清掉，換誰用都可以");KR.open("");}'
+  + '};window.KR=KR;'
+
+  + 'if(window.visualViewport){window.visualViewport.addEventListener("resize",fitVH);'
+  + 'window.visualViewport.addEventListener("scroll",fitVH);}'
+  + 'window.addEventListener("resize",fitVH);fitVH();'
+  + 'if(START==="unlocked"&&USERS.length){var u0=USERS[0];'
+  + 'dev={userId:u0.id,name:u0.name,emoji:u0.emoji,theme:u0.theme};}'
+  + 'chip();'
+  + 'if(START==="auto")setTimeout(function(){KR.open("");},700);';
+}
+
+buildControls();
+render();
+</script>
+</body>
+</html>
