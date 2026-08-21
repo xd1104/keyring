@@ -51,13 +51,13 @@ jobs:
 
       - name: 取出公版
         if: steps.gate.outputs.ready == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: keyring
 
       - name: 取出 ${{ matrix.app.label }}
         if: steps.gate.outputs.ready == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ matrix.app.repo }}
           token: ${{ secrets.APP_SYNC_TOKEN }}
