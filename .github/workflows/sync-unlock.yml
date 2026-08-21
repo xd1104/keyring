@@ -1,0 +1,95 @@
+# 把解鎖模組（client/keyring-unlock.js）推到每個接了鑰匙圈的 App。
+#
+# 為什麼要這個：Pages App 沒有伺服器，模組必須跟 App 一起發布，所以每個 App
+# 都得自帶一份檔案。以前是手動複製 4 份（2 個 App × public/ 與 docs/），
+# 漏貼就會走鐘——demo 那份手抄拷貝就這樣落後了 60 幾條 CSS。
+# 現在改成：只改這個 repo，其他 App 由這條 workflow 自動跟上。
+#
+# 要新增一個 App：在下面 matrix 加一行就好。
+#
+# 需要的 secret：APP_SYNC_TOKEN
+#   fine-grained PAT，Repository access 只勾下面 matrix 裡那幾個 repo，
+#   權限只給 Contents: Read and write。這把 token 只住在 Actions secret，
+#   不會進到瀏覽器、也不會出現在公開的 keyring.json 裡——跟「每個 App 一把
+#   只授權自己 repo 的金鑰」那條鐵律管的是不同東西。
+
+name: 同步解鎖模組到各 App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - client/keyring-unlock.js
+      - .github/workflows/sync-unlock.yml
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: ${{ matrix.app.label }}
+    runs-on: ubuntu-latest
+    # 一個 App 失敗不要拖累另一個
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - { repo: xd1104/travel-book,    label: 旅途手帳 }
+          - { repo: xd1104/benson-receipe, label: 食譜本 }
+
+    steps:
+      # token 還沒設就好好講一句然後跳過，不要讓 checkout 噴一坨看不懂的認證錯誤。
+      - name: 檢查 token 設了沒
+        id: gate
+        env:
+          TOKEN: ${{ secrets.APP_SYNC_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::還沒設 APP_SYNC_TOKEN，這次先跳過。設定位置：這個 repo → Settings → Secrets and variables → Actions → New repository secret"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 取出公版
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          path: keyring
+
+      - name: 取出 ${{ matrix.app.label }}
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.app.repo }}
+          token: ${{ secrets.APP_SYNC_TOKEN }}
+          path: app
+
+      - name: 覆蓋並提交
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          LABEL: ${{ matrix.app.label }}
+        run: |
+          set -euo pipefail
+          SRC=keyring/client/keyring-unlock.js
+
+          # docs/ 是 build.js 從 public/ 鏡射出來的產物，但它有進版控，
+          # 而 build.js 只跑在 Benson 的電腦上——所以兩份都要寫。
+          for dir in public docs; do
+            if [ ! -d "app/$dir" ]; then
+              echo "::error::$LABEL 沒有 $dir/，這個 App 的結構跟預期不一樣，先確認再說"
+              exit 1
+            fi
+            cp "$SRC" "app/$dir/keyring-unlock.js"
+          done
+
+          cd app
+          if git diff --quiet; then
+            echo "$LABEL 已經是最新的，不用動"
+            exit 0
+          fi
+
+          git config user.name  "keyring-sync"
+          git config user.email "keyring-sync@users.noreply.github.com"
+          git add public/keyring-unlock.js docs/keyring-unlock.js
+          git commit -m "chore: 同步鑰匙圈解鎖模組（keyring@${GITHUB_SHA:0:7}）"
+          git push
+          echo "$LABEL 已更新"

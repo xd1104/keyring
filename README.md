@@ -92,6 +92,29 @@ Keyring.init({
 然後：footer 放 `Keyring.chipHtml()`；寫入守門處改成 `Keyring.open("動作名")`；
 首頁畫完呼叫一次 `Keyring.maybeIntro()`（第一次進站主動端一次解鎖，之後永遠不再自動彈）。
 
+### 以後改一次就好：其他 App 自動跟上
+
+第 1 步的「複製一份」只做一次。之後**只改這個 repo 的 `client/keyring-unlock.js`**，
+`.github/workflows/sync-unlock.yml` 會在 push 後自動把它 commit 進每個 App 的
+`public/` 與 `docs/`（`docs/` 是 `build.js` 的產物，但它進版控、而 `build.js` 只跑在
+Benson 的電腦上，所以兩份都由 CI 寫）。手機上什麼都不用做。
+
+- **新增一個 App**：在那支 workflow 的 `matrix.app` 加一行 `{ repo: xd1104/xxx, label: 名字 }`。
+- **手動重跑**：Actions 分頁 →「同步解鎖模組到各 App」→ Run workflow。
+- **檔案已經一致**就不會產生空 commit；某個 App 失敗不會拖累另一個（`fail-fast: false`）。
+
+需要一把 secret：**`APP_SYNC_TOKEN`**（Settings → Secrets and variables → Actions）。
+fine-grained PAT，Repository access 只勾 matrix 裡那幾個 repo，權限只給
+**Contents: Read and write**。沒設的話 workflow 會印一行黃字提醒然後跳過，不會噴紅。
+
+> 這把 token 跟「每個 App 一把、只授權自己那一個 repo」那條鐵律管的不是同一件事：
+> 那條講的是**會被加密進公開 `keyring.json`、最後跑進瀏覽器**的 App 金鑰；
+> 這把只住在 Actions secret，不進瀏覽器、不進 `keyring.json`。
+
+⚠️ **`demo/unlock-v3.html` 不在同步範圍內**——它是一份手抄的重寫版（把模組塞進 iframe 的
+`srcdoc` 來試玩假資料），不是拷貝，同步腳本蓋不過去。它已經落後本體一整組矮螢幕自適應
+（`kr-short` / `kr-tiny` / `kr-micro`）。**看 demo 的時候記得它不等於線上的樣子。**
+
 ### 視覺：新 App 接進來零設定（v3 公版，2026-08-20 Benson 拍板）
 
 **解鎖畫面是跨 App 的公版，不用調任何顏色、不用在你的 CSS 裡寫一條 `kr-` 規則。**
