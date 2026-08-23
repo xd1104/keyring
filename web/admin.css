@@ -1,0 +1,139 @@
+/* 鑰匙圈手機後台 — 色票沿用桌面後台（public/admin.css），但版面是手機優先。
+ * 桌面後台是「坐在電腦前面慢慢弄」，這邊是「站在路邊單手改一筆」：
+ * 一律單欄、按鈕最小 48px、input 一律 16px（iOS 才不會自動放大）。 */
+:root{
+  --bg:#f7f4ee; --card:#ffffff; --ink:#2b2620; --muted:#8f8578; --line:#e8e1d5;
+  --acc:#ff6b5e; --acc-deep:#e2503f; --ok:#2fa87a; --bad:#d64545;
+  --warn:#8a5b12; --warn-bg:#fff6e3; --warn-line:#f2dcae;
+  --shadow:0 2px 14px rgba(70,55,30,.08);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  background:var(--bg);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  color:var(--ink);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+button{font-family:inherit; border:none; background:none; cursor:pointer; color:inherit; padding:0;}
+h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
+
+/* ---------- 解鎖 ---------- */
+#lock{max-width:460px; margin:0 auto; padding:calc(28px + env(safe-area-inset-top)) 18px 60px;}
+.lk-head{text-align:center; margin-bottom:22px;}
+.lk-head .big{font-size:46px;}
+.lk-head h1{font-size:23px; font-weight:800; margin-top:8px;}
+.lk-head p{font-size:13.5px; color:var(--muted); margin-top:7px; line-height:1.7;}
+.lk-card{background:var(--card); border-radius:20px; box-shadow:var(--shadow); padding:18px 18px 20px;}
+.lk-card .why{font-size:12.5px; color:var(--muted); line-height:1.7; margin-top:-4px; margin-bottom:14px;}
+.lk-btn{width:100%; min-height:52px; border-radius:15px; background:var(--acc); color:#fff;
+  font-size:16.5px; font-weight:800; box-shadow:0 4px 14px rgba(226,80,63,.28); margin-top:4px;}
+.lk-btn[disabled]{opacity:.55;}
+.lk-alt{width:100%; min-height:48px; border-radius:14px; background:#f3eee4; color:#6b6154;
+  font-size:14.5px; font-weight:700; margin-top:10px;}
+.lk-err{background:var(--warn-bg); border:1px solid var(--warn-line); color:var(--warn);
+  border-radius:14px; padding:12px 14px; font-size:13.5px; line-height:1.65; margin-bottom:14px; overflow-wrap:anywhere;}
+.lk-foot{text-align:center; color:#b3a996; font-size:12px; line-height:1.8; margin-top:20px;}
+
+/* ---------- 主畫面 ---------- */
+#app{max-width:560px; margin:0 auto; padding:calc(14px + env(safe-area-inset-top)) 14px 100px;}
+.ad-head{display:flex; align-items:center; gap:10px; padding:6px 2px 12px;}
+.ad-head h1{font-size:20px; font-weight:800; flex:1;}
+.ad-head button{min-width:44px; min-height:44px; border-radius:12px; background:#ece5d6;
+  font-size:15px; color:#6b6154; display:flex; align-items:center; justify-content:center;}
+
+.pub-bar{display:flex; align-items:center; gap:10px; border-radius:16px; padding:12px 14px;
+  background:#e8f6ef; border:1px solid #cfe9dd; margin-bottom:14px;}
+.pub-bar.bad{background:var(--warn-bg); border-color:var(--warn-line);}
+.pub-bar.busy{background:#eef2fb; border-color:#d6def2;}
+.pub-txt{flex:1; min-width:0; font-size:13.5px; line-height:1.55;}
+.pub-txt b{display:block; font-size:14.5px; font-weight:800; color:var(--ok);}
+.pub-bar.bad .pub-txt b{color:var(--warn);}
+.pub-bar.busy .pub-txt b{color:#43539b;}
+.pub-txt span{display:block; color:var(--muted); font-size:12px; margin-top:2px; overflow-wrap:anywhere;}
+.pub-bar button{min-height:44px; padding:0 16px; border-radius:13px; font-size:14px; font-weight:800;
+  background:var(--acc); color:#fff; flex:0 0 auto;}
+
+.ad-tabs{display:flex; background:#ece5d6; border-radius:14px; padding:3px; margin-bottom:16px;}
+.ad-tabs button{flex:1; min-height:46px; border-radius:11px; font-size:15px; font-weight:700; color:var(--muted);}
+.ad-tabs button.on{background:#fff; color:var(--ink); box-shadow:0 1px 4px rgba(0,0,0,.08);}
+
+.rowcard{background:var(--card); border-radius:18px; box-shadow:var(--shadow); padding:13px 14px;
+  display:flex; align-items:flex-start; gap:12px; margin-bottom:11px;}
+.rc-face{width:48px; height:48px; border-radius:16px; display:flex; align-items:center; justify-content:center;
+  font-size:24px; color:#fff; flex:0 0 auto;}
+.rc-bd{flex:1; min-width:0;}
+.rc-bd b{font-size:16.5px; overflow-wrap:anywhere;}
+.rc-bd .chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:7px;}
+.chip{background:#f3eee4; color:#6b6154; font-size:12px; font-weight:700; padding:4px 9px; border-radius:99px;}
+.chip.none{background:#faf4ec; color:#b3a996; font-weight:600;}
+.keyline{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; color:#6b6154;
+  background:#faf6ee; border-radius:9px; padding:6px 9px; margin-top:8px; display:inline-block; overflow-wrap:anywhere;}
+.rc-more{min-width:44px; min-height:44px; border-radius:12px; background:#f3eee4; color:#6b6154;
+  font-size:17px; font-weight:800; flex:0 0 auto; display:flex; align-items:center; justify-content:center;}
+.addcard{border:2px dashed #d8cfbf; border-radius:18px; min-height:60px; color:var(--muted); font-size:15.5px;
+  font-weight:700; width:100%; display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:18px;}
+.empty{text-align:center; color:var(--muted); padding:26px 10px;}
+.empty .big{font-size:38px;}
+.empty p{font-size:13.5px; margin-top:8px; line-height:1.75;}
+.ad-foot{text-align:center; color:#b3a996; font-size:12px; padding:22px 8px 10px; line-height:1.8;}
+
+/* ---------- sheet（手機從底部上來） ---------- */
+#sheet-layer{position:fixed; inset:0; z-index:80;}
+.backdrop{position:absolute; inset:0; background:rgba(30,22,14,.45); animation:fadeIn .2s;}
+.sheet{position:absolute; left:0; right:0; bottom:0; background:#fff;
+  border-radius:22px 22px 0 0; padding:16px 18px calc(20px + env(safe-area-inset-bottom));
+  max-height:90dvh; overflow-y:auto; box-shadow:0 -8px 40px rgba(40,30,15,.25);
+  animation:slideUp .22s ease;}
+@media (min-width:640px){
+  .sheet{left:50%; bottom:auto; top:50%; transform:translate(-50%,-50%); width:520px;
+    border-radius:20px; animation:popIn .2s ease;}
+}
+@keyframes fadeIn{from{opacity:0;} to{opacity:1;}}
+@keyframes slideUp{from{transform:translateY(24px); opacity:0;} to{transform:translateY(0); opacity:1;}}
+@keyframes popIn{from{transform:translate(-50%,-46%); opacity:0;} to{transform:translate(-50%,-50%); opacity:1;}}
+.sheet-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px;}
+.sheet-head h3{font-size:18px; font-weight:800; overflow-wrap:anywhere;}
+.sheet-head button{min-width:44px; min-height:44px; font-size:18px; color:var(--muted);
+  display:flex; align-items:center; justify-content:center; flex:0 0 auto;}
+.sheet .note{font-size:12.5px; color:var(--muted); line-height:1.7; margin:-4px 0 14px;}
+
+.field{display:block; margin-bottom:13px;}
+.field .fl{display:block; font-size:13px; font-weight:700; color:var(--muted); margin-bottom:6px;}
+.field input,.field textarea{
+  width:100%; font-size:16px; font-family:inherit; color:var(--ink);
+  padding:13px; border:1.5px solid var(--line); border-radius:13px; background:#fbfaf6;}
+.field textarea{min-height:84px; resize:vertical; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13.5px;}
+.field input:focus,.field textarea:focus{outline:none; border-color:var(--acc); background:#fff;}
+.field .hint{font-size:12px; color:var(--muted); margin-top:6px; line-height:1.6;}
+
+.picks{display:flex; gap:8px; flex-wrap:wrap;}
+.picks button{width:46px; height:46px; border-radius:14px; background:#f3eee4; font-size:22px;
+  display:flex; align-items:center; justify-content:center;}
+.picks button.on{outline:2.5px solid var(--acc); background:#fff;}
+.picks.themes button{width:46px; height:46px; border-radius:50%;}
+.picks.themes button.on{outline:3px solid var(--ink); outline-offset:2px;}
+
+.checks{display:flex; flex-direction:column; gap:8px;}
+.checks label{display:flex; align-items:center; gap:11px; min-height:50px; padding:8px 12px;
+  border:1.5px solid var(--line); border-radius:14px; background:#fbfaf6; font-size:15px; font-weight:600;}
+.checks label.on{border-color:var(--acc); background:#fff6f4;}
+.checks input{width:22px; height:22px; accent-color:var(--acc); flex:0 0 auto;}
+
+.sheet-acts{display:flex; gap:9px; margin-top:16px;}
+.sheet-acts button{flex:1; min-height:52px; border-radius:15px; font-size:16px; font-weight:800;}
+.sheet-acts .go{background:var(--acc); color:#fff; box-shadow:0 4px 14px rgba(226,80,63,.28);}
+.sheet-acts .go[disabled]{opacity:.55;}
+.sheet-acts .cancel{background:#f3eee4; color:#6b6154;}
+.menu-list{display:flex; flex-direction:column; gap:8px;}
+.menu-list button{min-height:54px; border-radius:14px; background:#f7f3ec; font-size:15.5px; font-weight:700;
+  color:var(--ink); text-align:left; padding:0 16px; display:flex; align-items:center; gap:10px;}
+.menu-list button.danger{color:var(--bad); background:#fbeeee;}
+
+/* ---------- toast ---------- */
+/* 刻意放上面：sheet 打開時主要按鈕都在下緣，toast 蓋住它們就會點不到 */
+#toast{position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top)); transform:translateX(-50%);
+  background:#2b2620; color:#fff; font-size:14.5px; font-weight:600; padding:13px 20px; border-radius:14px;
+  z-index:90; max-width:calc(100vw - 32px); text-align:center; line-height:1.5; transition:opacity .25s;}
+#toast.bad{background:var(--bad);}
+#toast.hidden{opacity:0; pointer-events:none;}

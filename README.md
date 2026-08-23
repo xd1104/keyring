@@ -7,19 +7,21 @@
 
 Pages 是純靜態、**沒有伺服器可以驗密碼**。所以：
 
-1. 後台（這個工具，只跑在 Benson 的電腦）把每個 App 的 PAT **用每個人的密碼各加密一份**。
+1. 後台（電腦上的 `server.js`，或手機上的 `web/`）把每個 App 的 PAT **用每個人的密碼各加密一份**。
 2. 密文寫進 `keyring.json`，自動 push 到這個公開 repo。
 3. App 前端抓 `keyring.json`，使用者選自己、輸密碼，**在瀏覽器裡**用 WebCrypto 解開，
    把解出來的金鑰寫進那個 App 原本就在用的 localStorage key。
 
 密碼錯的唯一症狀就是「解不開」（AES-GCM 驗證失敗），所以檔案裡**不需要、也沒有**密碼或密碼 hash。
 
-## 兩個檔案（別搞混）
+## 四個檔案（別搞混）
 
 | 檔案 | 內容 | 會不會上傳 |
 |---|---|---|
 | `secrets.json` | **明文 PAT** ＋ 每個人的派生金鑰 | ❌ 在 `.gitignore` 裡，永遠只在這台電腦 |
 | `keyring.json` | 只有 salt／iv／密文 | ✅ 這就是要發布的東西 |
+| `vault.json` | 整份 `secrets.json` 加密後的樣子（給手機後台用） | ✅ 是密文，但要有管理密碼＋配對碼才解得開 |
+| `vault.key` | 解 `vault.json` 的金鑰＋這台電腦的配對碼 | ❌ 在 `.gitignore` 裡，跟 `secrets.json` 同一級 |
 
 刻意存「派生金鑰」而不是密碼：後台真的看不到任何人的密碼，但又能在「多給某人一個 App」時
 直接用他的金鑰加密新條目，不必再問他一次密碼。**換密碼＝重新派生金鑰＋把所有 PAT 重加密。**
@@ -47,10 +49,57 @@ Pages 是純靜態、**沒有伺服器可以驗密碼**。所以：
 ## 怎麼開
 
 雙擊 `start.bat`，或用 tool-manager 面板 →「AI 工具」→ 鑰匙圈。網址 <http://localhost:4620>。
+手機後台在 <https://xd1104.github.io/keyring/web/>（本機也開得起來：<http://localhost:4620/web/>，
+拿來在電腦上先試一遍）。
 
 - 存檔就自動發布（git commit + push），沒有草稿狀態、沒有發布按鈕。
 - 發布失敗（沒網路、repo 沒開）只會在上面那條顯示原因，**本機一定已經存好了**。
-- 安全閘門：`secrets.json` 若不在 `.gitignore` 裡，整個發布會直接中止。
+- 安全閘門：`secrets.json` 或 `vault.key` 若不在 `.gitignore` 裡，整個發布會直接中止。
+
+## 手機後台（不用開電腦也能管）
+
+`web/` 是一份純靜態的後台，放在 GitHub Pages 上，手機開網頁就能加人、換密碼、貼新金鑰、
+登記新 App —— 跟本機後台做得到的事一模一樣。它沒有伺服器，做法跟 `keyring-unlock.js` 同一套：
+
+1. 本機後台把整份 `secrets.json`（明文 PAT ＋ 每個人的派生金鑰 ＋ 一把寫回 repo 用的 GitHub 金鑰）
+   加密成 `vault.json` 發布出去。
+2. 手機抓 `vault.json`，**在瀏覽器裡**用「管理密碼 ＋ 裝置配對碼」解開。
+3. 改完重新加密，用 vault 裡那把 GitHub 金鑰直接呼叫 GitHub API，
+   把 `vault.json` 與 `keyring.json` **包成同一個 commit** 寫回去。
+
+明文一秒都沒離開那台裝置，中間沒有任何後端看得到它。
+
+### 為什麼要「配對碼」
+
+`vault.json` 是公開檔案。只靠一組密碼的話，「猜到密碼 ＝ 拿到所有 App 的 PAT」。
+所以解密金鑰是 `PBKDF2(管理密碼 + "\n" + 配對碼)`：配對碼是本機後台產的 80-bit 隨機碼，
+**只住在裝置裡**（電腦的 `vault.key`、手機的 `localStorage`），不進任何公開檔案。
+整份 `vault.json` 被抓走、密碼又剛好被猜中，沒有配對碼還是解不開。
+
+手機第一次要貼一次配對碼（後台有「複製連結」，開帶 `#pair=` 的連結會自動收下），之後只要輸密碼。
+
+### 怎麼開起來
+
+1. **本機後台** →「📱 手機後台」→ 設一組管理密碼（至少 8 個字，它等於所有 App 的金鑰）。
+2. 同一頁「手機那邊寫回 GitHub 用的金鑰」→ 貼一把 fine-grained PAT：
+   Repository access 只勾 `keyring`，權限只給 **Contents: Read and write**。
+   沒貼的話手機進得去、但存不回來。
+3. repo 的 **Settings → Pages → Deploy from a branch → `main` / `(root)`**（只要按這一次）。
+4. 手機開 <https://xd1104.github.io/keyring/web/>，貼配對碼、輸管理密碼。
+
+> 這把寫回用的 PAT 跟各 App 那些「一把只授權自己那一個 repo」的金鑰是分開的兩件事：
+> 它只加密進 `vault.json`，不會進 `keyring.json`，也不會跑到任何 App 的瀏覽器裡。
+
+### 兩邊都能改，`vault.json` 是唯一真本
+
+本機後台**每次動手之前**都會先 `git fetch` 一次，比對遠端 `vault.json` 的 `updatedAt`：
+遠端比較新就整份接手過來（`merge -X theirs`，再從 vault 重建 `secrets.json`），否則維持本機。
+手機那邊反過來：存檔前先確認 GitHub 上的 commit 沒動過，動過就整份重新載入、請你再做一次，
+而且推的時候 `force:false` —— 寧可整筆失敗，也不要蓋掉對方剛存的東西。
+
+用時間戳而不是逐檔合併是刻意的：這三個檔案是同一份資料的三種樣子，各合各的只會合出壞資料。
+
+換管理密碼／換配對碼都在本機後台那一頁；換了之後每支手機要重新輸密碼（換配對碼才需要重貼配對碼）。
 
 ## 資料格式（`keyring.json`）
 
@@ -72,6 +121,33 @@ Pages 是純靜態、**沒有伺服器可以驗密碼**。所以：
   中文／日韓文當 id 會在不同系統之間被正規化成不同字串而分裂成兩筆——travel-book 吃過這個虧。
 - `cipher` ＝ AES-GCM 密文 ‖ 16 bytes authTag（WebCrypto 的格式，Node 端要自己接上去）。
 - 刻意用 JSON 不用 md：這是機器讀寫的檔，沒有人要手改，也就不必像 travel-book 那樣維護兩套 parser。
+
+### `vault.json`
+
+```jsonc
+{
+  "version": 1,
+  "updatedAt": "ISO",                                     // 兩邊對時就是看這一行
+  "kdf": { "algo": "PBKDF2-SHA256", "iter": 600000, "salt": "<base64>" },
+  "iv": "<base64>",
+  "cipher": "<base64>"    // AES-GCM(整份 secrets.json 的 JSON) ‖ 16 bytes authTag
+}
+```
+
+解開之後長這樣（＝`secrets.json` ＋ 一個 `github` 區塊）：
+
+```jsonc
+{
+  "version": 1, "updatedAt": "ISO",
+  "apps":  [{ "id": "travel-book", "name": "旅途手帳", "emoji": "🧳", "url": "", "token": "<明文 PAT>" }],
+  "users": [{ "id": "u-…", "name": "…", "emoji": "…", "theme": "…",
+              "salt": "<base64>", "dk": "<base64 派生金鑰>", "apps": ["travel-book"] }],
+  "github": { "owner": "xd1104", "repo": "keyring", "branch": "main", "token": "<寫回用的 PAT>" }
+}
+```
+
+加解密參數（PBKDF2-SHA256 600000 ＋ AES-GCM 256）在 `server.js`、`client/keyring-unlock.js`、
+`web/admin.js` **三個地方**各有一份實作，改要三邊一起改。
 
 ## 別的 App 要導入（三步）
 
