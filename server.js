@@ -8,12 +8,18 @@
  *   用「每個人的密碼」各加密一份，密文放公開的鑰匙圈 repo，手機前端用 WebCrypto 解開。
  *   密碼錯 = AES-GCM 驗證失敗，不需要另外存 hash。
  *
- * 兩個檔案（刻意分開）：
+ * 四個檔案（刻意分開）：
  *   secrets.json  本機專用。明文 PAT ＋ 每個人的派生金鑰。**在 .gitignore 裡，永不上傳**。
  *   keyring.json  公開產物。只有密文、salt、iv，沒有任何明文 PAT／密碼／密碼 hash。
+ *   vault.json    公開產物，但整份是密文：secrets.json 用「管理密碼＋裝置配對碼」加密後的樣子。
+ *                 手機後台（web/，純靜態）就是靠它在瀏覽器裡把真本解開來改。
+ *   vault.key     本機專用。解 vault.json 的金鑰與這台電腦的配對碼。**一樣永不上傳**。
  *
  * 存檔即發布（Benson 拍板）：任何修改都會重產 keyring.json 並自動 git commit + push，
  * 不做「未發布變更」的草稿狀態。發布失敗（例如 repo 還沒開）不影響本機存檔，只回報狀態。
+ *
+ * 兩邊都能改（本機後台＋手機後台），vault.json 是唯一真本：
+ * 每次動手之前先跟 GitHub 對一次時間戳，遠端比較新就整份接受過來（見 refreshFromRemote）。
  *
  * 架構比照 travel-planner/server.js；本工具 port 4620。
  */
@@ -27,8 +33,13 @@ const { execFile } = require('child_process');
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
+const WEB_DIR = path.join(ROOT, 'web');
 const SECRETS_FILE = path.join(ROOT, 'secrets.json');
 const KEYRING_FILE = path.join(ROOT, 'keyring.json');
+const VAULT_FILE = path.join(ROOT, 'vault.json');
+/* 本機記著的 vault 金鑰。放本機是刻意的：這台電腦本來就有明文 PAT，
+ * 存了它，存檔時才不用每次再問一次管理密碼。跟 secrets.json 一樣永不上傳。 */
+const VAULTKEY_FILE = path.join(ROOT, 'vault.key');
 
 const PORT = process.env.PORT || 4620;
 
@@ -128,9 +139,119 @@ function encryptWithKey(keyBuf, plaintext) {
   const ct = Buffer.concat([c.update(Buffer.from(String(plaintext), 'utf8')), c.final()]);
   return { iv: iv.toString('base64'), cipher: Buffer.concat([ct, c.getAuthTag()]).toString('base64') };
 }
+/* WebCrypto 把 authTag 接在密文尾巴，Node 要自己拆回來 */
+function decryptWithKey(keyBuf, ivB64, cipherB64) {
+  const all = Buffer.from(String(cipherB64), 'base64');
+  if (all.length < 17) throw new Error('密文太短');
+  const tag = all.slice(all.length - 16);
+  const d = crypto.createDecipheriv('aes-256-gcm', keyBuf, Buffer.from(String(ivB64), 'base64'));
+  d.setAuthTag(tag);
+  return Buffer.concat([d.update(all.slice(0, all.length - 16)), d.final()]).toString('utf8');
+}
 
 /* ------------------------------------------------------------------ */
-/* secrets.json（本機唯一真本）                                         */
+/* vault.json — 手機後台的加密真本                                      */
+/* ------------------------------------------------------------------ */
+/*  金鑰 ＝ PBKDF2(管理密碼 + "\n" + 裝置配對碼, salt)
+ *
+ *  為什麼要配對碼：vault.json 是公開檔案，光靠一組密碼就等於「猜到密碼＝拿到所有 App 的 PAT」。
+ *  配對碼是一段隨機碼，只住在裝置裡（手機 localStorage、這台電腦的 vault.key），不進公開檔案，
+ *  所以就算整份 vault.json 被抓走、密碼也被猜中，沒有配對碼還是解不開。
+ *  手機第一次要貼一次配對碼（或開帶 #pair= 的連結），之後就只要輸密碼。
+ */
+const PAIR_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford base32：拿掉 I L O U，唸出來不會錯
+
+function newPairingCode() {
+  const bytes = crypto.randomBytes(16);
+  let out = '';
+  for (let i = 0; i < 16; i++) {
+    if (i && i % 4 === 0) out += '-';
+    out += PAIR_ALPHABET[bytes[i] % 32];
+  }
+  return out; // XXXX-XXXX-XXXX-XXXX（80 bits）
+}
+/* 使用者會打成小寫、會漏掉連字號、會把 O 打成 0 —— 一律先正規化再算金鑰 */
+function normalizePairing(s) {
+  return String(s || '').toUpperCase().replace(/[^0-9A-Z]/g, '')
+    .replace(/O/g, '0').replace(/[IL]/g, '1');
+}
+function deriveVaultKey(password, pairing, saltB64) {
+  const material = String(password) + '\n' + normalizePairing(pairing);
+  return crypto.pbkdf2Sync(
+    Buffer.from(material, 'utf8'),
+    Buffer.from(saltB64, 'base64'),
+    KDF.iter, KDF.keyLen, KDF.hash);
+}
+
+/* vault.key（本機）：{ salt, key(base64), pairing, createdAt } */
+let V = null;
+function loadVaultKey() {
+  try {
+    const d = JSON.parse(fs.readFileSync(VAULTKEY_FILE, 'utf8'));
+    V = (d && d.key && d.salt) ? d : null;
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('[vault] vault.key 讀取失敗：' + e.message);
+    V = null;
+  }
+}
+async function saveVaultKey() {
+  await writeFileAtomic(VAULTKEY_FILE, JSON.stringify(V, null, 2) + '\n');
+}
+
+/* 真本的內容（＝secrets.json 全部 ＋ 手機要用的 GitHub 寫入金鑰） */
+function buildVaultPayload() {
+  return {
+    version: 1,
+    updatedAt: S.updatedAt,
+    apps: S.apps.map((a) => ({ id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '' })),
+    users: S.users.map((u) => ({
+      id: u.id, name: u.name, emoji: u.emoji, theme: u.theme,
+      salt: u.salt, dk: u.dk, apps: (u.apps || []).slice(),
+    })),
+    github: {
+      owner: REPO_OWNER, repo: REPO_NAME, branch: 'main',
+      token: (S.github && S.github.token) || '',
+    },
+  };
+}
+async function writeVault() {
+  if (!V) return;
+  const e = encryptWithKey(Buffer.from(V.key, 'base64'), JSON.stringify(buildVaultPayload()));
+  const doc = {
+    version: 1,
+    updatedAt: S.updatedAt,
+    kdf: { algo: KDF.algo, iter: KDF.iter, salt: V.salt },
+    iv: e.iv, cipher: e.cipher,
+  };
+  await writeFileAtomic(VAULT_FILE, JSON.stringify(doc, null, 2) + '\n');
+}
+function decryptVaultText(text) {
+  if (!V) throw new Error('這台電腦還沒設定手機後台');
+  const doc = JSON.parse(text);
+  if (!doc || !doc.iv || !doc.cipher) throw new Error('vault.json 格式看不懂');
+  if (doc.kdf && doc.kdf.salt && doc.kdf.salt !== V.salt) {
+    throw new Error('這份 vault 是用另一組管理密碼／配對碼加密的');
+  }
+  return JSON.parse(decryptWithKey(Buffer.from(V.key, 'base64'), doc.iv, doc.cipher));
+}
+/* 把解開的真本接手成這台電腦的 secrets（手機那邊改過東西時走這條） */
+function adoptPayload(p) {
+  S = {
+    version: 1,
+    updatedAt: p.updatedAt || new Date().toISOString(),
+    apps: (p.apps || []).map((a) => ({
+      id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
+    })),
+    users: (p.users || []).map((u) => ({
+      id: u.id, name: u.name, emoji: u.emoji, theme: u.theme,
+      salt: u.salt, dk: u.dk, apps: Array.isArray(u.apps) ? u.apps.slice() : [],
+    })),
+    github: { token: (p.github && p.github.token) || '' },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* secrets.json（這台電腦的工作本；開了手機後台之後，真本是 vault.json）  */
 /* ------------------------------------------------------------------ */
 /*  {
  *    version, updatedAt,
@@ -140,7 +261,7 @@ function encryptWithKey(keyBuf, plaintext) {
  *  刻意存「派生金鑰」而不是密碼：後台真的看不到任何人的密碼（符合設計規格 1-3），
  *  但又能在「加一個 App 給某人」時直接用他的金鑰加密新條目，不必再問他一次密碼。
  */
-let S = { version: 1, updatedAt: null, apps: [], users: [] };
+let S = { version: 1, updatedAt: null, apps: [], users: [], github: { token: '' } };
 
 function loadSecrets() {
   try {
@@ -151,15 +272,17 @@ function loadSecrets() {
       updatedAt: d.updatedAt || null,
       apps: Array.isArray(d.apps) ? d.apps : [],
       users: Array.isArray(d.users) ? d.users : [],
+      github: { token: (d.github && d.github.token) || '' },
     };
     S.users.forEach((u) => { if (!Array.isArray(u.apps)) u.apps = []; });
   } catch (e) {
     if (e.code !== 'ENOENT') console.error('[secrets] 讀取失敗，改用空的鑰匙圈：', e.message);
-    S = { version: 1, updatedAt: null, apps: [], users: [] };
+    S = { version: 1, updatedAt: null, apps: [], users: [], github: { token: '' } };
   }
 }
-async function saveSecrets() {
-  S.updatedAt = new Date().toISOString();
+/* keepStamp：接手手機那邊的改動時要留著它的時間戳，否則這台電腦會平白變成「比較新」 */
+async function saveSecrets(keepStamp) {
+  if (!keepStamp) S.updatedAt = new Date().toISOString();
   await writeFileAtomic(SECRETS_FILE, JSON.stringify(S, null, 2) + '\n');
 }
 
@@ -216,11 +339,13 @@ function gitCmd(args) {
 /* 安全閘門：secrets.json 一定要被 git 忽略，否則什麼都不做。
  * 用「白名單語意」寫：確認它真的被忽略才放行，而不是列舉禁止的檔名。 */
 async function assertSecretsSafe() {
-  await gitCmd(['check-ignore', '-q', 'secrets.json']).catch(() => {
-    throw new Error('secrets.json 沒有被 .gitignore 忽略，為了安全已中止發布');
-  });
+  for (const f of ['secrets.json', 'vault.key']) {
+    await gitCmd(['check-ignore', '-q', f]).catch(() => {
+      throw new Error(f + ' 沒有被 .gitignore 忽略');
+    });
+  }
   const status = await gitCmd(['status', '--porcelain']);
-  if (/secrets\.json/.test(status)) throw new Error('git 看得到 secrets.json，為了安全已中止發布');
+  if (/secrets\.json|vault\.key/.test(status)) throw new Error('git 看得到 secrets.json 或 vault.key');
 }
 
 /* git 的英文錯誤 -> 人話 ＋ 下一步。使用者不該看到 "fatal: not a git repository"。 */
@@ -286,8 +411,9 @@ async function publish() {
       await assertSecretsSafe();
     } catch (e) {
       return fail('unsafe',
-        '為了安全，這次沒有發布：明文金鑰的檔案（secrets.json）沒有被 .gitignore 擋住，不能讓它上傳。',
-        ['檢查 keyring 資料夾裡的 .gitignore 有沒有 secrets.json 這一行', '修好之後按「再試一次」']);
+        '為了安全，這次沒有發布：' + firstLine(e && e.message) + '。這種檔案一上傳，公開的鑰匙圈就等於直接被解開。',
+        ['檢查 keyring 資料夾裡的 .gitignore 有沒有 secrets.json 與 vault.key 這兩行',
+         '修好之後按「再試一次」']);
     }
 
     await gitCmd(['add', '-A']);
@@ -364,11 +490,70 @@ async function setupRepo() {
   return publish();
 }
 
-/* 每次異動：重產 keyring.json -> 存 secrets.json -> 自動發布 */
+/* 每次異動：重產 keyring.json -> 存 secrets.json -> 存 vault.json -> 自動發布 */
 async function commitChanges() {
   await saveSecrets();
   await writeFileAtomic(KEYRING_FILE, JSON.stringify(buildKeyring(), null, 2) + '\n');
+  await writeVault();
   return publish();
+}
+
+/* ------------------------------------------------------------------ */
+/* 跟手機那邊對時（vault.json 是唯一真本）                               */
+/* ------------------------------------------------------------------ */
+/*  兩邊都能改，所以動手之前一定要先看一眼 GitHub：
+ *    遠端 vault 比較新 -> 整份接受過來（merge -X theirs，再從 vault 重建 secrets.json）
+ *    否則              -> 維持本機（merge -X ours）
+ *  用時間戳而不是逐檔合併，是因為這三個檔案是同一份資料的三種樣子，各合各的只會合出壞資料。
+ *  沒設定手機後台（沒有 vault.key）就整段跳過，行為跟以前一模一樣。 */
+let syncState = { ok: true, at: null, message: '', adopted: false };
+
+async function refreshFromRemote() {
+  if (!V) return syncState;
+  let branch = 'main';
+  try {
+    await gitCmd(['rev-parse', '--is-inside-work-tree']);
+    await gitCmd(['remote', 'get-url', 'origin']);
+    branch = (await gitCmd(['rev-parse', '--abbrev-ref', 'HEAD'])).trim() || 'main';
+  } catch (e) {
+    return syncState; // 還沒接上 GitHub：publish() 那條狀態列已經在講這件事了
+  }
+  try {
+    /* 先把本機沒 commit 的東西收乾淨，merge 才不會被擋下來 */
+    await assertSecretsSafe();
+    await gitCmd(['add', '-A']);
+    if ((await gitCmd(['status', '--porcelain'])).trim()) {
+      await gitCmd(['commit', '-m', 'keyring: local update ' + new Date().toISOString()]);
+    }
+    await gitCmd(['fetch', 'origin', branch]);
+
+    let remoteVault = null;
+    try { remoteVault = JSON.parse(await gitCmd(['show', 'origin/' + branch + ':vault.json'])); } catch { /* 遠端還沒有 */ }
+    const remoteAt = (remoteVault && remoteVault.updatedAt) || '';
+    const localAt = S.updatedAt || '';
+    const adopt = !!remoteAt && remoteAt > localAt;
+
+    await gitCmd(['merge', '--no-edit', '-X', adopt ? 'theirs' : 'ours', 'origin/' + branch]);
+
+    if (adopt) {
+      adoptPayload(decryptVaultText(fs.readFileSync(VAULT_FILE, 'utf8')));
+      await saveSecrets(true); // 留著手機那邊的時間戳
+      syncState = { ok: true, at: new Date().toISOString(), message: '接手了手機那邊的改動', adopted: true };
+      console.log('[sync] 遠端比較新，已接手（' + remoteAt + '）');
+    } else {
+      syncState = { ok: true, at: new Date().toISOString(), message: '', adopted: false };
+    }
+  } catch (e) {
+    syncState = { ok: false, at: new Date().toISOString(), adopted: false,
+      message: '跟 GitHub 對時沒成功：' + firstLine(e && e.message) };
+    console.error('[sync] ' + syncState.message);
+  }
+  return syncState;
+}
+
+/* 動手之前先對時；對時失敗不擋改動（本機一定存得下去），只把原因記在狀態列 */
+async function beforeChange() {
+  if (V) await refreshFromRemote();
 }
 
 /* ------------------------------------------------------------------ */
@@ -385,7 +570,21 @@ function viewState() {
       id: u.id, name: u.name, emoji: u.emoji, theme: u.theme, apps: (u.apps || []).slice(),
     })),
     publish: pubState,
+    sync: syncState,
+    vault: vaultState(),
     updatedAt: S.updatedAt,
+  };
+}
+
+/* 手機後台的狀態（配對碼會回傳：它本來就要唸給手機聽，而且沒有密碼也沒用） */
+function vaultState() {
+  return {
+    enabled: !!V,
+    pairing: V ? V.pairing : '',
+    createdAt: V ? V.createdAt : null,
+    ghMasked: maskToken((S.github && S.github.token) || ''),
+    hasGh: !!(S.github && S.github.token),
+    webUrl: 'https://' + REPO_OWNER + '.github.io/' + REPO_NAME + '/web/',
   };
 }
 
@@ -400,6 +599,50 @@ async function handleApi(req, res, url) {
   const m = req.method;
 
   if (p === '/state' && m === 'GET') return sendJson(res, 200, { ok: true, state: viewState() });
+
+  /* 兩邊都能改：任何寫入之前先跟 GitHub 對一次時間戳，免得蓋掉手機那邊剛改的東西。
+   * （設定手機後台本身、發布、接線這幾支自己處理，不走這條） */
+  if (m !== 'GET' && p !== '/publish' && p !== '/setup' && p !== '/sync') {
+    await beforeChange();
+  }
+
+  if (p === '/sync' && m === 'POST') {
+    await refreshFromRemote();
+    return sendJson(res, 200, { ok: true, state: viewState() });
+  }
+
+  /* ---- 手機後台（vault） ---- */
+  if (p === '/vault' && m === 'POST') {
+    const b = await readJson(req);
+    const pw = String(b.password || '');
+    if (pw.length < 8) return sendJson(res, 400, { ok: false, message: '管理密碼至少 8 個字（這一組等於所有 App 的金鑰）' });
+    const pairing = (V && !b.newPairing) ? V.pairing : newPairingCode();
+    const salt = crypto.randomBytes(16).toString('base64');
+    V = {
+      salt, pairing,
+      key: deriveVaultKey(pw, pairing, salt).toString('base64'),
+      createdAt: (V && V.createdAt) || new Date().toISOString(),
+    };
+    await saveVaultKey();
+    await commitChanges();
+    return sendJson(res, 200, { ok: true, state: viewState() });
+  }
+  if (p === '/vault' && m === 'DELETE') {
+    V = null;
+    await fsp.unlink(VAULTKEY_FILE).catch(() => {});
+    await fsp.unlink(VAULT_FILE).catch(() => {});
+    await commitChanges();
+    return sendJson(res, 200, { ok: true, state: viewState() });
+  }
+  if (p === '/vault/github' && m === 'POST') {
+    const b = await readJson(req);
+    const token = String(b.token || '').trim();
+    if (!token) return sendJson(res, 400, { ok: false, message: '先貼上 GitHub 金鑰' });
+    if (!S.github) S.github = { token: '' };
+    S.github.token = token;
+    await commitChanges();
+    return sendJson(res, 200, { ok: true, state: viewState() });
+  }
 
   /* 這兩支「請求本身」一定算成功（HTTP 200 + ok:true）；
    * 發布結果看 state.publish，才不會讓前端把「發布沒成功」講成「失敗（200）」 */
@@ -579,6 +822,17 @@ function serveStatic(req, res, url) {
   if (rel === '/keyring.json') {
     return streamFile(res, KEYRING_FILE, { 'Access-Control-Allow-Origin': '*' });
   }
+  // 加密真本。跟 keyring.json 一樣是「本來就要公開」的檔，本機開放是為了先在電腦上試手機後台
+  if (rel === '/vault.json') {
+    return streamFile(res, VAULT_FILE, { 'Access-Control-Allow-Origin': '*' });
+  }
+  // 手機後台：正式上線是 GitHub Pages 的 /web/，這裡讓它在電腦上也能先跑一遍
+  if (rel === '/web' || rel === '/web/') rel = '/web/index.html';
+  if (rel.indexOf('/web/') === 0) {
+    const wf = path.join(WEB_DIR, path.normalize(rel.slice(5)).replace(/^([/\\])+/, ''));
+    if (!wf.startsWith(WEB_DIR)) { res.writeHead(400); return res.end('bad path'); }
+    return streamFile(res, wf);
+  }
   // 前端解鎖模組的正本放這裡，各 App 複製過去用
   if (rel === '/keyring-unlock.js') {
     return streamFile(res, path.join(ROOT, 'client', 'keyring-unlock.js'), { 'Access-Control-Allow-Origin': '*' });
@@ -605,10 +859,14 @@ const server = http.createServer(async (req, res) => {
 });
 
 loadSecrets();
+loadVaultKey();
 server.listen(PORT, async () => {
   console.log('Keyring admin running at http://localhost:' + PORT);
   console.log('Secrets (local only): ' + SECRETS_FILE);
   console.log('Public keyring:       ' + KEYRING_FILE);
+  if (V) console.log('Mobile admin vault:   ' + VAULT_FILE + '（配對碼 ' + V.pairing + '）');
   await diagnose();          // 第一個畫面就要說實話
   if (!pubState.ok) console.log('[publish] ' + pubState.message);
+  /* 開機先跟手機那邊對一次時間戳，否則第一個畫面可能是舊的 */
+  await refreshFromRemote();
 });
