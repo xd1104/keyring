@@ -5,4 +5,6 @@ Thumbs.db
 
 # ⚠️ 明文金鑰與每個人的加密金鑰只存這台電腦，永遠不進 repo
 secrets.json
+# ⚠️ 解 vault.json 的金鑰與裝置配對碼。上傳它 = 公開的 vault.json 直接被解開
+vault.key
 *.tmp~*

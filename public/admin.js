@@ -17,7 +17,8 @@ var THEME_KEYS = Object.keys(THEMES);
 var EMOJIS = ["🧔","👩","🧑","👧","👦","🐱","🐶","🦊","🐻","🌻","⭐","🍀"];
 var APP_EMOJIS = ["📦","🧳","🍳","🏋️","📓","🎮"];
 
-var S = { apps:[], users:[], publish:{ok:true, message:"", at:null} };
+var S = { apps:[], users:[], publish:{ok:true, message:"", at:null},
+          sync:{ok:true, message:"", adopted:false}, vault:{enabled:false} };
 var adTab = "users";
 var formState = {};
 
@@ -64,13 +65,17 @@ function render(){
     + '<div class="ad-head"><h1>🔑 鑰匙圈</h1>'
     +   '<p>管理誰可以編輯哪個 App。存檔就自動發布出去，不用另外按什麼。</p></div>'
     + pubBar()
+    + syncBar()
     + '<div class="ad-tabs">'
     +   '<button class="'+(adTab==="users"?"on":"")+'" onclick="setTab(\'users\')">👥 使用者</button>'
     +   '<button class="'+(adTab==="apps"?"on":"")+'" onclick="setTab(\'apps\')">📦 App 金鑰</button>'
+    +   '<button class="'+(adTab==="vault"?"on":"")+'" onclick="setTab(\'vault\')">📱 手機後台</button>'
     + '</div>'
-    + (adTab==="users" ? adUsers() : adApps())
-    + '<div class="ad-foot">密碼是各自加密的，這裡看不到、也救不回來。<br>'
-    +   '有人忘記密碼，就在這裡幫他換一組新的。金鑰的明文只留在這台電腦。</div>';
+    + (adTab==="users" ? adUsers() : adTab==="apps" ? adApps() : adVault())
+    /* 手機後台那頁有自己的說明，不要再疊一段講使用者密碼的 */
+    + (adTab==="vault" ? '' :
+        '<div class="ad-foot">密碼是各自加密的，這裡看不到、也救不回來。<br>'
+      + '有人忘記密碼，就在這裡幫他換一組新的。金鑰的明文只留在這台電腦。</div>');
 }
 function setTab(t){ adTab=t; render(); }
 
@@ -114,6 +119,128 @@ function doSetup(btn){
     api("/state").then(applyState).catch(function(){});
     toast(e.message, "err");
   });
+}
+
+/* 兩邊都能改，所以「跟 GitHub 對時」失敗要講出來：
+ * 對不到時這台電腦有可能拿著舊的真本在改，那件事必須讓他知道。 */
+function syncBar(){
+  var s=S.sync||{};
+  if(!S.vault || !S.vault.enabled || s.ok!==false) return "";
+  return '<div class="pub-bar bad"><div class="pub-txt"><b>沒跟手機那邊對到時間</b>'
+    + '<span>'+esc(s.message||"")+'　現在改東西有可能蓋掉手機上剛改的。</span></div>'
+    + '<div class="pub-acts"><button class="pub-btn" onclick="doSync(this)">再對一次</button></div></div>';
+}
+function doSync(btn){
+  busy(btn, "對時中…");
+  api("/sync","POST").then(function(d){
+    applyState(d);
+    toast(S.sync && S.sync.ok ? "對好了" : (S.sync.message||"還是對不到"), S.sync && S.sync.ok ? "ok" : "err");
+  }).catch(function(e){ toast(e.message,"err"); render(); });
+}
+
+/* ---------- 手機後台 ---------- */
+/* 手機那邊沒有伺服器可以問，所以真本要加密成 vault.json 放上公開 repo：
+ * 解它需要「管理密碼 ＋ 裝置配對碼」，配對碼只住在裝置裡、不進任何公開檔案。 */
+function adVault(){
+  var v=S.vault||{};
+  if(!v.enabled){
+    return '<div class="empty"><div class="big">📱</div>'
+      + '<p>還沒開手機後台。<br>開了之後，你在任何一支手機上開一個網頁就能加人、換密碼、貼新金鑰，<br>'
+      +   '不用回到這台電腦。</p></div>'
+      + '<div class="warnbox" style="margin-bottom:14px">開了之後，這份鑰匙圈的<b>全部內容</b>（明文 PAT 與每個人的派生金鑰）'
+      +   '會加密成公開的 vault.json 送上 GitHub。解得開它需要兩樣東西：你等一下設的<b>管理密碼</b>，'
+      +   '加上這台電腦產生的<b>裝置配對碼</b>（只會出現在這裡跟你貼過的裝置上）。</div>'
+      + '<button class="addcard" onclick="openVaultForm(true)">＋ 開啟手機後台</button>';
+  }
+  var link = v.webUrl + "#pair=" + v.pairing;
+  return '<div class="sec-title">手機上打開這個網址</div>'
+    + '<div class="rowcard"><div class="rc-bd"><b>網址</b>'
+    +   '<div class="keyline">'+esc(v.webUrl)+'</div></div>'
+    +   '<div class="rc-acts"><button onclick="copyText('+JSON.stringify(v.webUrl).replace(/"/g,"&quot;")+', this)">複製</button></div></div>'
+    + '<div class="rowcard"><div class="rc-bd"><b>裝置配對碼</b>'
+    +   '<div class="keyline" style="font-size:16px; letter-spacing:1px">'+esc(v.pairing)+'</div>'
+    +   '<div class="chips"><span class="chip none">手機第一次要貼一次，之後只要輸密碼</span></div></div>'
+    +   '<div class="rc-acts"><button onclick="copyText('+JSON.stringify(link).replace(/"/g,"&quot;")+', this)">複製連結</button></div></div>'
+    + '<div class="sec-title">手機那邊寫回 GitHub 用的金鑰</div>'
+    + '<div class="rowcard"><div class="rc-bd"><b>'+(v.hasGh?"已經設好了":"還沒設 —— 手機現在只能看，存不回去")+'</b>'
+    +   '<div class="keyline">'+esc(v.ghMasked||"（還沒有）")+'</div>'
+    +   '<div class="chips"><span class="chip none">fine-grained PAT · 只給這個 keyring repo 的 Contents: Read and write</span></div></div>'
+    +   '<div class="rc-acts"><button onclick="openVaultGh()">'+(v.hasGh?"換一把":"貼一把")+'</button></div></div>'
+    + '<div class="sec-title">其他</div>'
+    + '<div class="rowcard"><div class="rc-bd"><b>換管理密碼／換配對碼</b>'
+    +   '<div class="chips"><span class="chip none">換了之後，每一支手機都要重新配對一次</span></div></div>'
+    +   '<div class="rc-acts"><button onclick="openVaultForm(false)">換</button>'
+    +   '<button class="danger" onclick="askDisableVault()">關掉手機後台</button></div></div>'
+    + '<div class="ad-foot">解 vault.json 的金鑰存在這台電腦的 vault.key（跟 secrets.json 一樣永不上傳）。<br>'
+    +   '手機改完之後，這台電腦下次動手之前會自動把它接手過來。</div>';
+}
+
+function copyText(text, btn){
+  var done=function(ok){
+    if(btn){ btn.textContent = ok?"複製好了":"複製不了"; setTimeout(function(){ render(); }, 1200); }
+    if(!ok) toast("複製不了，直接選起來複製", "err");
+  };
+  if(navigator.clipboard) navigator.clipboard.writeText(text).then(function(){done(true);}, function(){done(false);});
+  else done(false);
+}
+
+function openVaultForm(isNew){
+  openDialog('<div class="sheet-head"><h3>'+(isNew?"開啟手機後台":"換管理密碼")+'</h3>'
+    +   '<button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + '<div class="hint" style="margin-top:0">這一組密碼加上配對碼，才解得開 vault.json。'
+    +   '它跟使用者的密碼是兩回事 —— 它等於所有 App 的金鑰，設長一點。</div>'
+    + '<label class="field"><span class="fl">管理密碼</span>'
+    +   '<input id="vf-pw" type="password" placeholder="至少 8 個字" autocomplete="new-password" '
+    +   'autocapitalize="off" spellcheck="false"></label>'
+    + (isNew ? '' :
+        '<label class="field" style="display:flex; align-items:center; gap:10px">'
+        + '<input id="vf-newpair" type="checkbox" style="width:20px; height:20px; margin:0">'
+        + '<span class="fl" style="margin:0">順便換一組新的配對碼</span></label>'
+        + '<div class="hint">勾了的話，每一支已經配對過的手機都要重新貼一次。</div>')
+    + '<div class="warnbox">換完之後 vault.json 會用新金鑰重寫一次。已經配對的手機不用重貼配對碼（除非你勾了上面那個），但要改用新密碼。</div>'
+    + '<button class="btn-primary" onclick="saveVault(this)">'+(isNew?"開啟":"換成這組")+'</button>', "vf-pw");
+}
+function saveVault(btn){
+  var pw=($("vf-pw").value||"");
+  if(pw.length<8){ toast("管理密碼至少 8 個字", "err"); return; }
+  var newPair = $("vf-newpair") ? $("vf-newpair").checked : false;
+  busy(btn, "產生金鑰中…");
+  api("/vault","POST",{password:pw, newPairing:newPair})
+    .then(function(d){ applyState(d); closeSheet(); adTab="vault"; render();
+      toast("開好了，手機那邊照畫面上的網址跟配對碼進去","ok"); })
+    .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="開啟"; } });
+}
+function openVaultGh(){
+  openDialog('<div class="sheet-head"><h3>手機寫回 GitHub 的金鑰</h3>'
+    +   '<button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + '<div class="hint" style="margin-top:0">手機那邊沒有 git，是直接呼叫 GitHub API 寫回這個 keyring repo。'
+    +   '用 fine-grained PAT，Repository access 只勾 keyring，權限只給 Contents: Read and write。</div>'
+    + '<label class="field"><span class="fl">金鑰</span>'
+    +   '<input id="vg-key" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false"></label>'
+    + '<div class="warnbox">它只會加密進 vault.json，不會出現在 keyring.json，也不會進任何明文檔案。'
+    +   '這把跟各 App 那些「只授權自己那一個 repo」的金鑰是分開的兩件事。</div>'
+    + '<button class="btn-primary" onclick="saveVaultGh(this)">存起來</button>', "vg-key");
+}
+function saveVaultGh(btn){
+  var k=($("vg-key").value||"").trim();
+  if(!k){ toast("先貼上金鑰", "err"); return; }
+  busy(btn, "存檔中…");
+  api("/vault/github","POST",{token:k})
+    .then(function(d){ applyState(d); closeSheet(); toast("存好了，手機那邊現在可以存回來了","ok"); })
+    .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="存起來"; } });
+}
+function askDisableVault(){
+  openDialog('<div class="sheet-head"><h3>關掉手機後台？</h3><button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + '<div class="warnbox">vault.json 會從 repo 上刪掉，手機那邊就進不去了。'
+    + '這台電腦的 secrets.json 一點都不會動，本機後台照常用。</div>'
+    + '<button class="btn-danger" onclick="doDisableVault(this)" style="margin-bottom:10px">關掉</button>'
+    + '<button class="btn-ghost" onclick="closeSheet()">算了</button>');
+}
+function doDisableVault(btn){
+  busy(btn, "關閉中…");
+  api("/vault","DELETE")
+    .then(function(d){ applyState(d); closeSheet(); toast("關掉了"); })
+    .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="關掉"; } });
 }
 
 function adUsers(){
