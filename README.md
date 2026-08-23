@@ -130,7 +130,19 @@ fine-grained PAT，Repository access 只勾 matrix 裡那幾個 repo，權限只
 接第 N 個 App 就會再壞一次，v3 從根上拿掉了這個狀態。）
 
 > 給改這個模組的人：`#kr-full` 子樹內**一個宿主變數都不准讀**，連 `var(--acc, fallback)` 都不行。
-> 模組自己的常數用 `--krs-*` 前綴，定義在 `#kr-full` 上。驗收方式是 `grep`，不是用眼睛。
+> 模組自己的常數用 `--krs-*` 前綴，定義在 `#kr-full` 上。
+
+### 改完模組請跑機器驗收
+
+```
+node tools/check-unlock.js            # 全部 38 條
+node tools/check-unlock.js --only=A,B # 只跑某幾組
+```
+
+零依賴（自己開 headless Chrome ＋ 本機測試宿主，用假 token 跑真的 PBKDF2＋AES-GCM）。
+它守的是：密度 class 底下不准有動畫、`#kr-full` 讀宿主變數必須 0（**走 live CSSOM 不是 grep**——
+grep 會被註解與「同一條規則裡被後面蓋掉的宣告」誤報）、三個宿主 computed style 逐項相同、
+觸控目標 ≥44px、四條動畫路徑不重播、矮螢幕五階不被切、底部不露白（含反向對照）、減少動態真的不播。
 
 ### 這個模組還做了什麼
 

@@ -555,3 +555,441 @@ function fitVH(){
 1. **B 案（推薦，demo 預設）vs A 案**——demo 上方切「配色方案」可以直接對照。
 2. **身分頁（已解鎖點藥丸）也用滿版**（推薦，統一）——還是那一頁維持小小的就好？
 3. **後台要不要加一個選填的「備註」欄位**（例：「手機那支」）解決同名分不出來？不加的話會顯示英文 id，能用但沒那麼漂亮。
+
+---
+
+# 解鎖畫面 v4 視覺・lab-ux（2026-08-21）
+
+> Demo：`demo/unlock-v3.html`（雙擊即開）。**這一輪只動 demo，`client/keyring-unlock.js` 一個字都沒改**，等 Benson 拍板後才由 lab-dev 搬。
+> 這一段是 v3 的**增修**，不是取代：v3 §2~§5、§7~§9 的所有決定（B 案深色公版、顏色歸屬、三段式版面、「先看看就好」三件事、class 對照表）全部有效。
+> 起因是 Benson 兩句話：①「輸入密碼的時候他下面會是白色的，很醜」②「加一點解鎖動畫，現在有點死板、有點不高級」。
+
+## 1. 白色是怎麼來的（診斷，已在 demo 重現）
+
+`#kr-full` 是 `position:fixed; left/top/right:0; height:var(--kr-vh)`，**沒有 `bottom`**。兩條路徑各自會露白：
+
+| # | 情境 | 為什麼露白 | 白會在哪 |
+|---|---|---|---|
+| A | 鍵盤滑上來的那 250~300ms | `visualViewport` 的 resize 立刻把 `--kr-vh` 從 800 縮到 407，但鍵盤還在路上 ⇒ 中間那段**沒有任何元素去畫** | 層底下、鍵盤上面，一閃而過 |
+| B | iOS 對焦 input | Safari 把 **layout viewport 往上捲**（`visualViewport.offsetTop` 變成 40~60），而 `position:fixed` 是釘在 layout viewport 的 ⇒ 整層在螢幕上往上跑那麼多 | 層底下一條，**不會消失**，而且頂欄被切掉 |
+
+B 是主兇（「一直是白的」）。`offsetTop` 目前完全沒被讀。
+
+**死路（別再試）**：不能用 `position:fixed` 的子元素去補下面那塊 —— `#kr-full` 有 `backdrop-filter`，會成為 fixed 子孫的 containing block，逃不出去。
+
+## 2. 修法（兩行 CSS ＋ 兩行 JS）
+
+**2-1 把「層以外」也畫掉 —— `#kr-full::before` 加一個大 spread 的實色 `box-shadow`**
+
+```css
+#kr-full{ --krs-bleed:#191510; }              /* 新增常數 */
+#kr-full::before{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background: radial-gradient(120% 70% at 50% -14%, rgba(255,203,140,.16), rgba(255,203,140,0) 62%),
+              radial-gradient(150% 95% at 50% 116%, rgba(0,0,0,.16), rgba(0,0,0,0) 60%);
+  box-shadow: 0 0 0 100vmax var(--krs-bleed);  /* ← 就是這行 */
+}
+```
+
+- **不動 DOM、不動 `applyDensity()` 的量測基準**（`::before` 是 absolute，不參與 flex 版面）。
+- `100vmax` 是**陰影擴散半徑**不是尺寸，不需要跟著鍵盤變，跟「不可用 100vh」那條無關（那條講的是 layer 的 height）。
+- `--krs-bleed` 刻意比層底**再深一點**（層合成後約 `rgb(36,31,26)`，bleed 是 `#191510`）：讀起來像「層的陰影往外收」，而不是一條接縫。⚠️ **底部那道 vignette 不要調深**（現在 `rgba(0,0,0,.16)`），調到 .30 以上就會跟 bleed 對出一條看得見的線。
+- 不支援 `backdrop-filter` 的瀏覽器照樣正常（bleed 是實色，跟 blur 無關）。
+
+**2-2 把層貼回可視區 —— 讀 `visualViewport.offsetTop`**
+
+```css
+#kr-full{ top:var(--kr-top,0px); }   /* 原本是 top:0 */
+```
+```js
+function fitVH(){
+  var vv = global.visualViewport;
+  var h  = vv ? vv.height : global.innerHeight;
+  var t  = (vv && vv.offsetTop) ? vv.offsetTop : 0;                    /* 新增 */
+  if (h) document.documentElement.style.setProperty("--kr-vh", h + "px");
+  document.documentElement.style.setProperty("--kr-top", t + "px");    /* 新增 */
+  applyDensity();
+}
+```
+`fitVH` 已經掛在 `visualViewport` 的 **resize ＋ scroll**（iOS 捲動時是 scroll 在動），不用加新的 listener。
+
+**2-3 `applyDensity()` 改用 `offsetHeight`**
+
+```js
+if (layer.classList.contains("kr-leave")) return;   /* 離場動畫進行中不重算 */
+var h = layer.offsetHeight || layer.getBoundingClientRect().height;
+```
+理由：`getBoundingClientRect()` **會把進／離場的 `scale()` 算進去**（實測進場時量到 636 而不是 624），高度剛好卡在門檻上時會在鍵盤彈出的瞬間閃一次密度切換。`offsetHeight` 只回版面高度。
+
+**不准動的**：`.kr-foot` 維持 flex item（鍵盤彈出時自然停在鍵盤上方）；`.kr-short/.kr-tiny/.kr-micro` ＋ `ResizeObserver` 這套整組保留；不可用 `100vh`；不可用 `@media(max-height:…)` 做密度。
+
+## 3. 質感（非動畫的部分，這一段比動畫重要）
+
+原則：**深底上的平面色塊看起來就是「黑框框」**。加一道上緣高光＋一層外投影，材質就出來了，成本是零。
+
+⚠️ **鐵律：`background-color` 與 `background-image` 一定要分開寫，禁止用 `background` 簡寫接漸層。** 用簡寫會把 computed 的 `background-color` 變成 `transparent`——那正是 v2.0 那顆隱形解鎖鈕的死法，而且 lab-qa 量的就是 `background-color`。（已實測：加了 sheen 之後 `.kr-go` 的 `background-color` 仍是 `rgb(246,239,225)`。）
+
+| 元素 | 改動 |
+|---|---|
+| `.kr-tile` | `background-color:var(--krs-face)` ＋ `background-image:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 62%)` ＋ `box-shadow:inset 0 1px 0 rgba(255,255,255,.07), 0 2px 6px rgba(0,0,0,.16)`；hover 換成 `.10` 高光＋`0 6px 18px rgba(0,0,0,.22)`；`:active` `scale(.965)` |
+| `.kr-av` | 加 `position:relative`（給成功光圈用）；shadow 改 `0 4px 14px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.30), inset 0 0 0 1px rgba(255,255,255,.14)` ⇒ 從貼紙變成有受光的球 |
+| `.kr-go` | 加 `background-image:linear-gradient(180deg,rgba(255,255,255,.60),rgba(255,255,255,0) 58%)` ＋ `box-shadow:0 6px 20px rgba(0,0,0,.30), inset 0 -1px 0 rgba(0,0,0,.05)`；`:active{transform:scale(.985)}` |
+| `.kr-field input` | focus 從「只換框色」加成 `box-shadow:0 0 0 3px rgba(255,255,255,.07)` 柔光圈；三個屬性都給 transition |
+| `.kr-x` / `.kr-back` / `.kr-eye` / `.kr-peek` / `.kr-ghost` / `.kr-danger` | 補 `:active`（手機沒有 hover，原本按下去完全沒回饋）＋ 對應 transition |
+| `#kr-full::before` | 多一層底部 vignette（見 §2-1） |
+| 新增常數 | `--krs-bleed:#191510`、`--krs-ease:cubic-bezier(.22,.9,.3,1)` |
+
+`.kr-why`／`.kr-err`／`.kr-warn`／`.kr-box`／`.kr-ghost`／`.kr-danger` 的 `background:` 一律改寫成 `background-color:`（值不變，只是為了讓 QA 量得到、也避免以後有人加 image 時踩到同一顆雷）。
+
+## 4. 動畫
+
+四個時機，每個都有**目的**，不是裝飾。全部走 `--krs-ease: cubic-bezier(.22,.9,.3,1)`。
+
+### 4-1 觸發時機的判定（這是整套的關鍵，先講）
+
+`paint()` 每次狀態變動都會重建整個 `innerHTML`——**如果進場動畫每次都跑，按一下顯示密碼、打錯一次、送出中，整屏都會重新蹦一次，那才是真的廉價。** 所以由 `paint()` 自己判斷，呼叫端一行都不用改：
+
+```js
+var lastKey = null;
+function screenKey(){ return ui.view+"|"+ui.step+"|"+(ui.userId||"")
+                     +"|"+(ring?"r":(ringErr?"e":"l")); }   /* 名單：ready／error／loading */
+
+/* paint() 開頭 */
+var k = screenKey();
+var mode = layer.hidden ? "open" : (k !== lastKey ? "step" : "");
+lastKey = k;
+if (reducedMotion()) mode = "";
+layer.className = (mode==="open" ? "kr-a-open" : mode==="step" ? "kr-a-step" : "");
+```
+
+- `open`＝這一層剛打開（整套進場）
+- `step`＝換屏（選人↔輸密碼、身分頁、換人確認）→ 只有中段動，頂欄與底條**留在原地不動**
+- `""`＝同一屏重繪（顯示密碼／錯誤／送出中）→ **完全不動**
+
+**判定出來的實際例子（別當 bug 修）**：
+
+| 操作 | 判定 | 為什麼 |
+|---|---|---|
+| 藥丸／守門處叫出解鎖畫面 | `open` | 層本來是 `hidden` |
+| 選人 → 輸密碼、`‹ 換一個人` | `step` | 同一層、換了一屏 |
+| 顯示密碼／打錯重繪／送出中／`✓ 解開了` | `""` | 同一屏的狀態變化（`ui.tries`／`show`／`busy`／`done` 刻意不進 key） |
+| 身分頁 → `🔄 換人用` 確認屏 | `step` | `ui.view` 從 `id` 變 `switch` |
+| **`doSwitch()`（「清掉，換人」）後回到選人屏** | **`step`（不是 `open`）** | 換人確認屏當下還開著、層沒有 `hidden` 過，所以是一次換屏而不是重新進場。**這是對的**：使用者眼裡是同一層裡換了一屏，中途沒有「整層再蹦一次」。（lab-qa 觀察 O-1，判定為改對了；下一個人不要把它「修」回 `open`。） |
+| 名單從「正在拿鑰匙圈…」變成人物磚／離線錯誤屏 | `step` | key 裡的名單狀態（`r`／`e`／`l`）變了 |
+
+⚠️ `close()` 要把 `lastKey = null`，否則關掉再開會被判成 step。
+⚠️ `layer.className` 被整個覆寫 ⇒ **密度 class 會被清掉**；`paint()` 尾端本來就有 `fitVH()`（內含 `applyDensity()`）會補回來，順序不可調換。
+⚠️ 容器 class **只准在這裡整份指派**，其他地方一律不准 `classList.remove()` 局部拆——理由見 §4-7。
+⚠️ **「同一屏連畫兩次」會把剛掛上去的 `kr-a-open` 清掉**（正本專屬的坑，demo 沒有）：`open()` 除了 `draw()` 之外還會 `fetchRing(false).then(draw)` 對一次名單，而 TTL 內的 `fetchRing` 是 `Promise.resolve` ⇒ 同一個 tick 內第二次 `paint()`，`screenKey` 沒變 ⇒ `mode=""` ⇒ 整份指派把 class 清空，**進場動畫等於沒播**（實測：class 空字串、磚的 `animation-delay` 0s）；網路慢一點則是播到一半被截斷。修法是**只有名單真的變了才重畫**（`listSig()` 比對 id/name/emoji/theme/hint），順便省掉一次沒必要的閃動。`retry()` 同理。
+
+### 4-2 進場（`.kr-a-open`，總長 ~0.6s，最後一顆磚 0.39s 就定位）
+
+| 元素 | 動畫 | 時間 |
+|---|---|---|
+| `#kr-full` | `kr-in`（opacity 0→1、scale 1.02→1） | .26s（沿用 v3，只改 ease） |
+| `.kr-top` | `kr-fade` | .30s，delay .06s |
+| `.kr-wrap > *`（標題／副標／理由條／form／stack） | `kr-rise`（opacity＋translateY 9px） | .34s，delay .05／.09／.13／.16s（`:nth-child`） |
+| `.kr-wrap > .kr-grid` | **`animation:none`**（讓磚各自動） | — |
+| `.kr-tile` | `kr-pop`（opacity＋translateY 10px＋scale .96） | .34s，`animation-delay:calc(.09s + var(--kr-i,0) * .032s)` |
+| `.kr-foot` | `kr-rise` | .34s，delay .17s |
+
+- 磚的序號用 **inline `style="--kr-i:N"`**（`sheetWho()` 的 `map` 加 index），這是這一輪唯一的 markup 變動。
+- `.kr-grid` 的排除規則權重要對：寫成 `#kr-full.kr-a-open .kr-wrap > .kr-grid{animation:none;}`（1,3,0），而且**必須放在 `:nth-child` 那幾條之後**（同權重靠後者勝出）。
+
+### 4-3 換屏（`.kr-a-step`，~0.33s）＋ 頭像共享形變
+
+`.kr-wrap > *` 跑 `kr-rise` .26s（delay 0／.04／.07），磚 `kr-pop` .28s（step .026s）。頂欄與底條不動。
+
+**選人 → 輸密碼**額外做一次 FLIP：把剛才那顆磚上的頭像位置記下來，換屏後套回新頭像再放掉，等於用動作講「你選的是這個人」。
+
+```js
+/* pick(id, ev) —— onclick 要多傳 event */
+var t = ev && ev.currentTarget ? ev.currentTarget.querySelector(".kr-av") : null;
+morphFrom = (t && !reducedMotion()) ? t.getBoundingClientRect() : null;
+
+/* paint() 內，will = (mode==="step" && morphFrom) 時：
+     el.innerHTML = …;
+     if (will) { var idEl = el.querySelector(".kr-id"); if (idEl) idEl.classList.add("kr-nofx"); }
+     el.hidden = false; fitVH();            // ← .kr-nofx 一定要在這行之前
+     if (will) runMorph(); else morphFrom = null;
+   ⚠️ 容器 class 只有 kr-a-open / kr-a-step，**沒有** kr-morphing。原因見 §4-7。 */
+function runMorph(){
+  var to = layer.querySelector(".kr-id .kr-av"), f = morphFrom; morphFrom = null;
+  /* 量不到就安靜放棄：.kr-nofx 留著，那一屏只是沒有進場動畫，不會壞也不會事後補播 */
+  if (!to || !f) return;
+  var b = to.getBoundingClientRect(); if (!b.width) return;
+  var dx = (f.left+f.width/2)-(b.left+b.width/2), dy = (f.top+f.height/2)-(b.top+b.height/2);
+  to.style.transition = "none";
+  to.style.transform  = "translate("+dx+"px,"+dy+"px) scale("+(f.width/b.width)+")";
+  requestAnimationFrame(function(){
+    to.style.transition = "transform .36s cubic-bezier(.22,.9,.3,1)";
+    to.style.transform  = "none";
+    /* 收尾只清自己設的 inline style，刻意不碰任何 class */
+    setTimeout(function(){ to.style.transition=""; to.style.transform=""; }, 400);
+  });
+}
+```
+配套 CSS（**必須排在 `.kr-a-step` 那幾條之後**）：
+```css
+#kr-full .kr-wrap > .kr-id.kr-nofx{ animation:none; }            /* 頭像自己在飛，這一列不要再位移 */
+#kr-full .kr-id.kr-nofx > div{ animation:kr-rise .28s var(--krs-ease) both .06s; }
+```
+`.kr-nofx` 由 `paint()` 在 `innerHTML` 之後、`fitVH()` 之前直接加在 `.kr-id` 元素上，**永遠不拆**（元素下次 paint 就整個換掉了）。
+⚠️ **這個開關絕對不可以掛回 `#kr-full` 的容器 class**——理由與實測時間軸見 §4-7，那是 v4 第一版被退件的原因。
+量不到（`!b.width`）就安靜跳過，不會壞。`backToWho()` 要 `morphFrom = null`。
+
+### 4-4 打錯密碼
+
+- `.kr-field` 加一次性 class `kr-shake` → `kr-nudge` .36s（左右 6→5→3→2px 遞減）。用 `ui.shake` 旗標：失敗分支設 `true`，`drawPw()` 開頭 `var sh = ui.shake; ui.shake = false;` 消費掉 ⇒ **只有真的打錯那一次會抖**，之後按顯示密碼重繪不會再抖。
+- `.kr-err` 自己帶 `animation:kr-rise .22s var(--krs-ease) both`（每次重繪都是新元素，自然會跑）。
+- 文案／次數規則不變（不做鎖定、不做倒數）。
+
+### 4-5 解鎖成功（總共 ~0.65s，這是這輪投資最大的地方）
+
+現在是「轉圈 → 突然消失 → toast」，等於沒有回饋。改成三拍：
+
+1. **確認**（0~430ms）：`ui.done=true` 重繪 → `.kr-go` 換成 `✓ 解開了` ＋ class `kr-ok`（`kr-okpop` .38s 輕彈一下，且要寫 `#kr-full .kr-go.kr-ok, #kr-full .kr-go.kr-ok[disabled]{opacity:1}` 蓋掉 disabled 的變暗）；`.kr-id .kr-av` 加 class `kr-ok` → `::after` 一圈 `kr-ring` .55s 擴散淡出。
+2. **退場**（430~660ms）：`closeLayer(true)` → 層加 `kr-leave kr-up` → `kr-out` .22s（opacity→0、scale→1.03，像門往前打開），`.kr-leave` 帶 `pointer-events:none` 讓底下馬上可點；用 timeout 收尾設 `hidden`。
+3. **落點**：身分藥丸 `kr-chipin` .34s 彈出 ＋ `kr-chipglow` .9s 亮一圈（`box-shadow` 從 `0 0 0 0 rgba(120,96,60,.34)` 擴到 `0 0 0 15px` 透明）。`kr-new` **不用計時器拆**（見 §4-7）。
+   **這一拍只呼叫一次 `chip(true)`，而且不排任何 JS 計時器**——標籤（狀態）立刻誠實，動畫（視覺）靠 CSS 的 `animation-delay` 自己等：
+
+```js
+closeLayer(true);
+chip(true);                                        /* 立刻：標籤已是「⟨名字⟩・可以編輯」 */
+toast("解開了，"+u.name+" 現在可以編輯 🎉");
+```
+```css
+/* delay 期間 fill 往回填 from ⇒ 藥丸 opacity:0、pointer-events:none，
+   層還在淡出的那 230ms 內完全看不見也點不到；層一消失才開始彈出。
+   .24s = kr-out .22s ＋ closeLayer 收尾 230ms 取整。 */
+.kr-chip.kr-chip.kr-new{
+  animation: kr-chipin .34s cubic-bezier(.22,.9,.3,1) .24s both,
+             kr-chipglow .9s ease-out .42s;
+}
+@keyframes kr-chipin{
+  from{ opacity:0; transform:translateY(7px) scale(.94); pointer-events:none; }
+  1%  { pointer-events:auto; }        /* 一開始播就恢復可點，不需要任何 JS 收尾 */
+  to  { opacity:1; transform:none; pointer-events:auto; }
+}
+```
+
+   這一版是**第三次改**才收斂的，前兩版錯在哪要記著（詳細通則見 §4-8、§4-9）：
+
+| 版本 | 寫法 | 出的事 |
+|---|---|---|
+| v1 | `closeLayer(true); chip(true);` 同一個 tick | 藥丸在 `ui.done` 後 445ms 就起跑、層 1298ms 才消失 ⇒ **彈出的前 2/3 與光暈（1257ms 起）整段被還沒淡完的層蓋掉，等於白做** |
+| v2 | `chip()` 立刻換標籤 ＋ `setTimeout(240)` 再 `chip(true)` 播動畫 | 標籤誠實了，但**藥丸被建立兩次**：靜止那顆從層半透明時（~110ms，層 opacity 0.679）就漸漸看得見，到 236ms 全亮，257ms 被第二次重建歸零、再淡入一次 ⇒ 看起來就是「閃一下」 |
+| **v3（現行）** | **一次 `chip(true)`，時序交給 CSS delay ＋ `fill:both`** | 標籤全程誠實、動畫仍在層 `display:none` 之後起跑、沒有靜止藥丸先露臉、不必重建兩次、不必收尾 |
+
+   實測（退場第 110ms）：文字 `Benson・可以編輯`、`opacity=0`、`pointer-events=none`、`elementFromPoint` **不會**命中藥丸（那個「看不見卻按得到」的窗也一併關掉了）；把動畫 `finish()` 之後 `opacity=1`、`transform` 回正、`pointer-events=auto`、`box-shadow=none`、`elementFromPoint` 命中 `BUTTON.kr-chip` ⇒ **完全靠 CSS 自己恢復**。整條成功路徑藥丸只建立 **1 次**。
+   ⚠️ 光暈刻意用**中性暖色寫死**，不吃 `--acc`——藥丸的規則仍是「主色只准上前景（`.kr-cta` 的文字）」。
+
+使用者自己關掉（✕／先看看就好）走 `closeLayer(false)` → `kr-outdn` .19s（scale .985，往後收），跟成功的「往前退開」方向刻意相反。
+
+`open()` 前要先 `clearTimeout(leaveT); layer.classList.remove("kr-leave","kr-up"); layer.hidden = true; lastKey = null;`，否則離場途中被重開會卡住。
+
+### 4-6 其他小回饋
+
+`.kr-spin` 不變。`.kr-box` 的打勾 `kr-tick`（scale .4→1）.2s **只在使用者真的動到勾選框時才播**：
+
+```css
+#kr-full .kr-check input:checked + .kr-box::after{ content:"\2713"; }
+#kr-full .kr-check input:checked + .kr-box.kr-tickable::after{ animation:kr-tick .2s var(--krs-ease) both; }
+```
+```html
+<input type="checkbox" id="kr-rm" onchange="KR.tick(this)" …>
+```
+```js
+tick: function(el){ var b = el.nextElementSibling; if (b) b.classList.add("kr-tickable"); }
+```
+原因：勾選框**預設就是打勾的**，而 `paint()` 每次重繪都產生新元素 ⇒ 不加這道閘的話，光是按「顯示密碼」勾勾就會跟著彈一次（實測按 9 次彈 9 次）。技術上每一次都是新元素的第一次播放、不算 §4-7 那種重播 bug，**但眼睛看得到，而那正是「廉價」的來源**。
+`kr-tickable` 加上去就不拆，元素重繪時自然跟著死 ⇒ 重繪出來的預設勾選不彈、使用者自己按出來的才彈。實測：剛畫出來 `::after` 的 `animation-name` 是 `none`、重繪 5 次仍是 `none`、使用者按過之後變 `kr-tick`、再重繪一次又回到 `none`。
+
+### 4-7 ⚠️ 動畫的「關閉開關」要掛在元素上，不可以掛在會被改動的容器 class 上
+
+**這是 v4 第一版被退件的原因，lab-dev 千萬不要照抄那個寫法。**
+
+第一版把「morph 期間 `.kr-id` 不要自己位移」寫成 `#kr-full.kr-morphing .kr-wrap > .kr-id{animation:none;}`，然後在 `runMorph()` 收尾的 `setTimeout(…,400)` 裡 `classList.remove("kr-morphing")`。實測時間軸（MutationObserver ＋ animationstart）：
+
+| t | 事件 |
+|---|---|
+| 2ms | class＝`kr-a-step kr-morphing`，頭像開始飛，`.kr-id` 的進場被正確壓住 |
+| 407ms | 收尾 `remove("kr-morphing")`，class 變成 `kr-a-step` |
+| **415ms** | **`.kr-id` 從頭再播一次 `kr-rise`**，666ms 才結束（其他元素 339ms 前就全部結束了） |
+
+Benson 回報的兩個症狀其實是**同一個 bug**：
+
+1. **「卡卡的」**：畫面已經安定 → 停約 70ms → 身分列自己又動一次。（幀率無辜：靜止與動畫當下都是 144fps、long frame 0。）
+2. **「頭像會閃一下」**：`kr-rise` 的第一格是 `from{opacity:0; transform:translate3d(0,9px,0)}`，重播的瞬間整排先「消失＋下移 9px」再淡回來。
+
+**機制**：CSS 動畫是「規則命中就播」。容器 class 一被移除，原本被更高權重壓著的 `.kr-a-step .kr-wrap > *` 就**重新命中**那個元素，瀏覽器視為一個全新的動畫、從第 0 格開始。**把重播延後或縮短沒有用，閃還是會在**——必須讓那條規則從頭到尾都不可能命中。
+
+**正解（已實作在 demo）**：把開關掛在元素身上，讓它跟元素同生共死。
+
+```css
+/* 排在 .kr-a-step 那幾條之後；(1,3,0) 打得贏 *:nth-child 的 (1,3,0) 靠的是源序 */
+#kr-full .kr-wrap > .kr-id.kr-nofx{animation:none;}
+#kr-full .kr-id.kr-nofx > div{animation:kr-rise .28s var(--krs-ease) both .06s;}
+```
+```js
+/* paint()：innerHTML 之後、任何「會強迫算樣式／版面」的動作之前 */
+if (will) { var idEl = layer.querySelector(".kr-id"); if (idEl) idEl.classList.add("kr-nofx"); }
+```
+
+`paint()` 每次都重建 `innerHTML` ⇒ `.kr-nofx` 跟著元素一起生、一起死，**沒有任何時機可以「拆掉它」**，規則自然不可能重新命中。`runMorph()` 因此**完全不碰 class**：收尾只清自己設的 inline `transform`／`transition`（transform 當下已經是 `none`，設空沒有視覺變化，也不會讓任何規則重新命中）；量不到就直接 `return`，那一屏只是沒有進場動畫，不會壞、也不會事後補播。
+
+⚠️ **順序不可調換**：`.kr-nofx` 必須在 `fitVH()` **之前**標上去——`fitVH()` 會讀 `offsetHeight`＝強迫 layout，動畫在那一刻就定生死了。
+
+**推廣成通則（搬正本時整份掃一次）**：
+
+> 滿版層的容器 class **只准用「整份指派 `layer.className = …`」來改，不准用 `classList.remove()` 局部拆**。整份指派一定發生在 `paint()`（那一刻所有子元素同時換新，重新命中＝正常的第一次播放）；局部拆則發生在元素活著的時候，那就是重播。
+
+依這條一起改掉的另外兩處（原本還沒出事，但寫法同型、遲早會犯）：
+
+- `chip()`：原本 `setTimeout(…,1200)` 拆 `kr-new` → **改成不拆**。`chip()` 本來每次就重建 `innerHTML`；`kr-chipglow` 沒有 `forwards`，播完自己回到 `box-shadow:none`（已實測 `chipShadow=none`）。
+- `closeLayer()`／`reopen()`：原本 `classList.remove("kr-leave","kr-up")` → 改成**先 `hidden = true`**（`display:none` 之後不可能有動畫跑）**再 `layer.className = baseCls()` 整份指派**。
+
+**同一個坑的第二個現場：祖先換成 `<html>` 也一樣會犯。**（v4 第二版被退件的那條）
+demo 的「動畫」控制原本用 `classList.toggle` 在活著的 `<html>` 上拆 `d-rm`／`d-plain`。實測：從「關掉」切回「完整動畫」時 `#kr-full` 在 8.9ms 觸發 `kr-in`、opacity 掉到 0 再淡回（**33 幀**）；從「只有淡入」切回「完整」則是 `form`(43.6ms) 與 `.kr-id > div`(64.5ms) 各重播一次 `kr-rise`。機制完全相同——**只要「動畫開關」是掛在某個祖先的 class 上，那個 class 在元素活著時被改動，就會重播**，`#kr-full` 與 `<html>` 沒有差別。
+處置：切動畫模式時**整份重畫那一屏**（`reopen()` ＋ `draw()`），讓 class 與元素同生共死。實測修正後三種切換（完整→關掉、關掉→完整、只有淡入→完整）都是 `.kr-id` 節點換新（`idNodeReused=false`）、**在切換前就活著的節點上 0 次 animationstart**。
+
+**唯一被允許保留的例外，以及它的代價**：`applyDensity()` 的 `classList.add/remove`（鍵盤／轉向隨時會改高度，拿不掉）。它現在無害是有條件的，條件要寫死在程式旁邊：
+> **密度 class（`.kr-short`／`.kr-tiny`／`.kr-micro`）底下只准寫尺寸與間距，不准寫 `animation`／`transition`。**
+（lab-qa 壓力測過：換屏動畫進行中連丟 15 次高度變化，replays = 0。但那是因為現在沒有動畫規則掛在密度 class 上，不是因為那樣寫本身安全。）
+
+**姊妹條款**：§4-8（動畫改動的**副作用**落在狀態上）與 §4-9（多段式轉場的時序不要用 JS 計時器串）是同一家族，做退場／延後動畫時三條要一起看。
+
+**量測陷阱（PM 踩過，記下來）**：這個 demo 跑在預覽面板裡時，**父層的 `requestAnimationFrame` 與 `setTimeout` 會被嚴重節流**（520ms 的取樣只拿到 1 幀、400ms 的 timeout 過了 1 秒還沒觸發）。驗動畫一律用 **iframe 自己的 `performance.now()` ＋ `MutationObserver`／`animationstart` 事件排序**，不要用父層計時器，否則會量出假的結論。
+
+### 4-8 ⚠️ 為了視覺效果延後某件事之前，先問「這件事有沒有承載狀態」
+
+**這是 v4 第三版被退件的原因。**
+
+§4-5 把 `chip(true)` 從「與 `closeLayer(true)` 同一個 tick」推遲到 +240ms，純粹是為了讓彈出動畫不要被還沒淡完的層蓋住——**視覺上完全正確，但它同時把「身分藥丸的標籤」一起延後了**。而那顆藥丸不只是裝飾：
+
+- 它的**文字就是系統狀態**（「🔒 只看看模式」vs「⟨名字⟩・可以編輯」）；
+- 它在那 220ms 內**真的可以點**——因為 `.kr-leave{pointer-events:none}` 是刻意設計的（讓底下馬上可點）。
+
+兩者相加＝**一個會說謊而且按得下去的按鈕**：使用者剛解鎖成功，按下去卻被丟回「誰要編輯？」。舊版（同 tick 重建）的說謊窗約 0ms，改動之後變成 220ms。
+
+**通則**：
+> 要延後的東西如果是**純視覺**（位移、縮放、透明度、光暈），延後隨便；如果它同時承載**狀態**（文字標籤、可用/不可用、可點擊區域、aria 屬性），就必須把它拆成「狀態立刻更新」＋「視覺稍後播放」兩件事。
+
+實務上的檢查方式（QA 可直接沿用）：**在退場動畫進行中，對每一個「底下露出來、而且 `pointer-events` 允許點擊」的元素做一次 hit-test**，斷言它的文字與點擊行為都已經是新狀態。不要用計時器猜時間點，用 `animationstart(kr-out)` 當觸發點。
+
+同型風險（目前沒犯，但要記著）：`.kr-go` 在 `ui.busy` 期間是 `disabled` 的，若哪天有人為了動畫把 `disabled` 的解除延後，就會開出「按鈕看起來還在轉圈但已經可以重複送出」的窗。
+
+**後續**：本節的修法（立刻換標籤、延後播動畫）自己又生出兩個缺陷（R-3／R-4），最後是靠 §4-9 的結構性寫法一次解掉。兩節要一起讀。
+
+### 4-9 ⚠️ 多段式轉場的時序，優先用 CSS `animation-delay` ＋ `fill:both` 表達，不要用 JS 計時器串
+
+**這一節是三輪退件換來的，lab-dev 搬正本時請先讀完再動退場那段。**
+
+解鎖成功那一拍同時要滿足三件事：**狀態標籤**要立刻誠實、**pointer-events** 要讓底下馬上可點、**動畫**要等層消失後才播。第一版把這三條時間線用 `setTimeout` 手工排在一起，結果是**每修一條就撞壞另一條**：
+
+| 輪次 | 改了什麼 | 撞出什麼 |
+|---|---|---|
+| S-1 | 把 `chip(true)` 從同 tick 延後到 +240ms（讓動畫別被層蓋住） | **R-2**：藥丸標籤跟著延後 ⇒ 退場那 220ms 內它「說謊而且點得到」 |
+| R-2 | 立刻 `chip()` 換標籤 ＋ +240ms 再 `chip(true)` 播動畫 | **R-3**：藥丸 onclick 從 `KR.open()` 變成 `openIdentity()`，而只有 `KR.open()` 會清 `leaveT` ⇒ 身分頁開了 120ms 又被舊計時器關掉<br>**R-4**：藥丸被建立兩次 ⇒ 先透出來、全亮、消失一兩幀、再淡入 |
+
+病根不是個別 bug，是**「用 JS 計時器把互相耦合的時間線串起來」這個做法本身**。
+
+**正解**：只做一次 DOM 更新（狀態立刻正確），把「什麼時候開始看得見」交給 CSS：
+
+- `animation-delay` 表達「等多久」，
+- `fill:both` 讓它在延遲期間**停在第 0 格**（`opacity:0` ⇒ 看不見），
+- 需要「延遲期間不可點」就把 `pointer-events` 一起排進 keyframes（`from{none}` / `1%{auto}`），**動畫一開始播就自己恢復，不需要任何 JS 收尾**。
+
+好處：時間線只有一條、寫在它作用的那個元素上、跟元素同生共死（呼應 §4-7），而且不會有「DOM 已經換了但 class 還沒跟上」的中間態（呼應 §4-8）。
+
+**JS 計時器不可能完全消失的那一個（`closeLayer` 的收尾 `leaveT`）要配一條守衛。** 退場靠計時器把 `hidden` 設回 true，所以**任何「退場途中又要重新畫東西」的路徑都必須先取消它**。不要在每個入口各補一次（R-3 就是漏了 `openIdentity()` 那一個），**守衛放在 `paint()`**——每一屏都會經過那裡，將來新增入口不必記得補：
+
+```js
+function paint(top, body, foot, focusId){
+  var el = layer();
+  /* 退場途中（class 還有 kr-leave）或已經藏起來 ⇒ 先 reopen()（內含 clearTimeout(leaveT)），
+     否則收尾計時器會在 230ms 後把剛打開的畫面關掉，變成「狀態機說開著、DOM 說關著」。 */
+  if (el.hidden || el.classList.contains("kr-leave")) reopen();
+  …
+}
+```
+⚠️ 判斷條件**不可以只寫 `el.hidden`**：退場途中 `hidden` 還是 `false`，那條路就永遠不清計時器（R-3 的原形）。
+守衛集中之後，`KR.open()`／`openIdentity()` 各自的 `reopen()` 就可以拿掉——**同一件事只留一個地方做**。
+
+**驗收方式**：不要只驗單一時間點，要**掃退場全程**（QA 的做法：用 `animationstart(kr-out)` 當觸發點，逐幀取樣層與底下每個可互動元素的 `opacity`／`pointer-events`／文字／`elementFromPoint`）。R-4 就是「只看 dt=110 一個點會過、掃全程才現形」的典型。
+
+## 5. `prefers-reduced-motion` 的降級行為
+
+**CSS**（放在檔尾，一條總閘）：
+```css
+@media (prefers-reduced-motion: reduce){
+  #kr-full{animation:none !important;}
+  #kr-full *:not(.kr-spin){animation:none !important; transition:none !important;}
+  #kr-full::before, #kr-full *::before, #kr-full *::after{animation:none !important;}
+  .kr-chip.kr-chip{animation:none !important; transition:none !important;}
+}
+```
+- `:not(.kr-spin)` 是刻意的：**讀取轉圈要留著**，那是狀態指示不是裝飾。
+- 偽元素要單獨列（`*` 選不到），否則成功光圈還是會動。
+- 所有 `kr-rise/kr-pop/kr-fade` 都是 `both` 填充 ⇒ `animation:none` 之後元素回到自然狀態（opacity 1、無位移），不會有東西不見。
+- ⚠️ **`.kr-chip.kr-chip{animation:none !important}` 這條現在是承重的**：§4-5 讓 `kr-chipin` 帶 `.24s` delay ＋ `fill:both`，延遲期間藥丸是 `opacity:0; pointer-events:none`。萬一哪天 `kr-new` 在減少動態模式下被掛上去，就靠這條把 fill 一起關掉。已實測：強行掛上 `kr-new` ＋ 減少動態 ⇒ `opacity=1`／`pointer-events=auto`／`animation-name=none`，不會卡成隱形。（正常路徑本來就不會掛：`chip(fresh)` 在 `reducedMotion()` 時不加 `kr-new`。）
+
+**JS**（四處，共用同一個判斷）：
+```js
+function reducedMotion(){
+  return !!(global.matchMedia && global.matchMedia("(prefers-reduced-motion: reduce)").matches);
+}
+```
+1. `paint()`：`mode = ""`（不加任何進場 class）。
+2. `pick()`：不記 `morphFrom` ⇒ 沒有頭像形變。
+3. `closeLayer()`：直接 `hidden = true`，不跑離場；成功後的 430ms 等待改成 0（`✓ 解開了` 仍會 render 一幀，因為那是**狀態**不是動作）。
+4. `chip(fresh)`：不加 `kr-new`。
+
+功能與資訊**一項都不減**，只是全部瞬間到位。
+
+## 6. demo 怎麼玩（給 Benson）
+
+`demo/unlock-v3.html` 雙擊即開。控制列第二排（紅色的）分成兩種行為：
+
+- **⌨ 鍵盤／iOS 捲動位移／底部露白 ＝ 即時切換，畫面不重來**（它們底下不掛任何 `animation`／`transition`）。這三個的用途就是「停在同一屏比對前後差異」，重畫會毀掉用途。
+- **動畫 ＝ 會把當下這一屏整份重畫一次**（`reopen()` ＋ `draw()`，密碼欄已打的字會保留）。理由見 §4-7：動畫開關是掛在 `<html>` 上的 class，在活著的畫面上拆掉會讓規則重新命中而重播。而且使用者按「完整動畫」的意圖本來就是「我要看動畫」，重新進場正是他要的結果。
+
+
+| 控制 | 用途 |
+|---|---|
+| ⌨ 鍵盤 | 全高／520／440／407／380／340 —— 直接改 iframe 內的 `--kr-vh`，同時把一個假鍵盤滑上來 |
+| iOS 捲動位移 | 無／46px —— 模擬 §1 的 B 情境（真機上 fixed 元素被 layout viewport 帶著往上跑） |
+| 底部露白 | 修好的／現況 —— **一鍵前後對照**，關掉就是 Benson 看到的那條白 |
+| 動畫 | 完整／現況只有淡入／關掉 —— 最後一個等同手機開了「減少動態效果」 |
+
+demo 這一輪也**補上了正本已經有、demo 卻缺的整組矮螢幕自適應**（`.kr-short/.kr-tiny/.kr-micro` ＋ `applyDensity()` ＋ ResizeObserver），不然鍵盤彈出時 demo 會演出跟真機不一樣的結果。
+
+**demo 專用、lab-dev 不要搬進正本的東西**（原始碼裡都有標）：`#d-kbd` 假鍵盤、`postMessage` 那段與 `DEMO` 物件、`html.d-nofix / d-drift / d-plain / d-rm` 四條覆寫、`fitVH()` 裡 `DEMO.kbd ||` 那一段、`.mode-a`（A 案對照）。
+
+## 7. 已經量過的（lab-dev 搬完要重量一次）
+
+用 headless Chrome 對 travel／recipe／**完全沒設色票的空白 App** 三個宿主，各量 12 個元素 × 15 個屬性＝180 項 computed style：**三份逐項完全相同**（公版的機器定義成立）。另外：
+
+- `#kr-full` 子樹內 `var(--acc|--ink|--muted|--line|--bg|--card|--bad)` 出現次數＝**0**；全檔 `--acc` 只出現一次，在 `.kr-chip .kr-cta` 的 `color`。
+- `.kr-go` 的 `background-color` ＝ `rgb(246, 239, 225)`（加了 sheen 之後仍然是），`background-image` 是那道 sheen。
+- `#kr-pw` 的 `font-size` ＝ `16px`；`.kr-x` 46×46、`.kr-peek` 62、`.kr-go`／`.kr-field input` 54、`.kr-box` 26（勾選整列 50）。
+- 動畫觸發判定實測：開啟→`kr-a-open`（第 2 顆磚 delay `.122s` ＝ `.09 + 1×.032` ✓）；選人→容器 `kr-a-step`、`.kr-id` 拿到 `kr-nofx`、頭像拿到 inline transform（400ms 後只清 inline style、class 不動）✓；**按顯示密碼／打錯重繪→className 為空**（不重跑進場）✓；成功→`✓ 解開了`＋`kr-ring`→`kr-leave kr-up`→藥丸 `kr-chipin, kr-chipglow` ✓。
+- 鍵盤情境實測（375×720、`--kr-vh` 407、offset 46）：修好的版本層剛好貼齊可視區、「先看看就好」停在鍵盤正上方、上下都沒有白；關掉修法則層整個上移 46px、頂欄被切、底下露出宿主的白卡片——與 Benson 描述一致。
+- **退件複驗（動畫重播／閃爍）**：在 `http://localhost:4621` 用 **iframe 自己的計時器**取樣，點磚之後 11 個時間點（含原本重播的 395／410／425／450ms 窗口）`.kr-id` 的 `opacity` **全部是 1**、`animationName` **全部是 `none`**、`transform` 全部是 `none`；`animationstart` 一次都沒對 `.kr-id` 觸發；`#kr-full` 的 class 在 342ms 進入 `kr-a-step` 之後**再也沒有變動**（舊版在 407ms 有一次 remove、415ms 重播）。⇒ 卡頓與閃爍同時消失。
+- 成功／關閉路徑同型掃描：`submit` 後兩次重繪 className 都是 `[]`（不重播進場）→ `kr-leave kr-up` → `hidden=true` 後才整份指派 className；藥丸 `kr-new` 留著但 `boxShadow` 已回到 `none`（`kr-chipglow` 無 forwards）；再開身分頁 → `kr-a-open`、關掉 → 加 `kr-leave` 不動 `kr-a-open`（不會讓子元素重新命中）。
+- **`#kr-full` 不讀宿主變數的驗法，改用 live CSSOM 掃**（lab-qa 提供，建議以後沿用）：把注入的 stylesheet 用 `document.styleSheets` 走一遍 `cssRules`，對每條 selector 含 `#kr-full` 的規則檢查其宣告值有沒有 `var(--acc|--ink|--muted|--line|--bg|--card|--bad)`。實測**掃描總量 215 條**（頂層 197 ＋ `@media` 巢狀 18，巢狀規則要遞迴拆開才不會漏），其中 **selector 命中 `#kr-full` 的有 177 條，讀宿主變數 0 條**。**比 grep 原始碼好**：不會被註解、字串、被覆蓋掉的規則誤報。
+- **退件複驗 R-1（切動畫模式造成重播）**：完整→關掉、關掉→完整、只有淡入→完整三種切換，`.kr-id` 節點都換新、切換前活著的節點上 0 次 animationstart；切到「關掉」時容器 class 為 `[]`（全部抑制），切回「完整」時為 `[kr-a-open]`（一次乾淨的重新進場）。
+- **S-1 三拍不再重疊**：層消失 @1280ms → 藥丸起跑 @1290ms（當下 `layer.hidden === true`），`animation-name` 為 `kr-chipin, kr-chipglow`。
+- **退件複驗 R-2（退場中藥丸說謊且可點）**：退場第 110ms 對藥丸中心 hit-test —— 文字已是 `Benson・可以編輯`、`elementFromPoint` 命中 `BUTTON.kr-chip`、點下去走 `KR.openIdentity()`（不再是 `KR.open()`）；`kr-chipin` 仍在層 `hidden=true / display=none / rectH=0` 之後才起跑；解鎖成功整條路徑的 replays＝`[]`（藥丸重建 2 次，都是新節點，沒有任何活著的節點因 class 變動而起播）。
+- **退件複驗 R-3（退場中點藥丸被舊計時器關掉）**：退場第 110ms 點藥丸 → 走 `KR.openIdentity()`，之後 dt=300／500／900ms 三個取樣點層都還開著、`ui.open=true`／`ui.view="id"`／畫面是「Benson」，`ui.open !== layer.hidden` 的一致性檢查全過（修正前 dt=240ms 會被 `leaveT` 關掉，最終狀態是「狀態機說開著、DOM 說關著」）。
+- **退件複驗 R-4（藥丸透出→全亮→消失→再淡入）**：整條成功路徑藥丸只建立 **1 次**（修正前 2 次）；退場第 110ms 量到文字已是 `Benson・可以編輯`、`opacity=0`、`pointer-events=none`、`elementFromPoint` 不命中藥丸；把動畫 `finish()` 之後 `opacity=1`／`transform` 回正／`pointer-events=auto`／`box-shadow=none`／`elementFromPoint` 命中 `BUTTON.kr-chip` ⇒ 全靠 CSS 自己恢復，零 JS 收尾。動畫參數實測 `kr-chipin(delay=240ms, dur=340ms, fill=both)` ＋ `kr-chipglow(delay=420ms, dur=900ms, fill=none)`。
+- **S-2 打勾一次性**：剛畫出來 `::after` 的 `animation-name` = `none`、重繪 5 次仍是 `none`、使用者真的按過之後 = `kr-tick`、再重繪一次回到 `none`。
+- 340px（最矮那一階）＋ 已打錯兩次：身分列／密碼欄／錯誤條／勾選／解鎖鈕／先看看就好**全部同時在畫面內**，沒有被切。
+
+## 8. 拍板狀態
+
+**已拍板（2026-08-21，Benson 試玩後）：第 1 項「要」、第 2 項「要」。** 第 3 項他還在試玩，先不動。
+
+1. ~~**解鎖成功要不要「多花那 0.4 秒」**~~ → **要**。現在打對密碼會先看到 `✓ 解開了`＋頭像亮一圈，再退場，總共比舊版多約 0.43 秒。好處是「有沒有成功」變得明確、而且視線被帶到下面的身分藥丸；代價是每次解鎖多等一下下（但一台裝置通常只解一次）。不要的話砍掉這 0.43 秒即可，其他動畫不受影響。
+2. ~~**選人時頭像「飛」過去要不要**~~ → **要**（實作在 §4-3，注意 §4-7 那個坑）。這是這一輪唯一比較「花」的動作，也是最有高級感的一個。如果覺得多餘，拿掉之後換屏就只剩淡入上移，其餘不變。
+3. **（待定）鍵盤彈到最矮時（`.kr-micro`，約 340~460px）現在會讓掉三樣次要的東西**：理由條（「要規劃新旅程得先解鎖」）、錯誤條的第二行（「跟 Benson 說一聲…」）、「先看看就好」的第二行說明。主鈕、密碼欄、「先看看就好」主文字一定留著。要不要換一組讓法？
