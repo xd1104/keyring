@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-24T08:52:44.261Z",
+  "updatedAt": "2026-08-24T08:53:13.932Z",
   "apps": [
     {
       "id": "travel-book",
@@ -11,6 +11,11 @@
       "id": "recipe-book",
       "name": "食譜本",
       "emoji": "🍳"
+    },
+    {
+      "id": "movie-library",
+      "name": "電影評分",
+      "emoji": "📓"
     }
   ],
   "users": [
@@ -26,12 +31,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "xJFERgHZ7cid0JVM",
-          "cipher": "XIYO8KdSlQx/LTzc4gNe3fv4tbz+4FQaEg6Han5zw8xVw1Nqbm5m03JYpR6M5GgxepSLoW0TS+gVvRm/DA56ipK8sdY/JJTAgq01wMg1ufwhce4NkQ0XmUz0Se9zUH0fl2pszWy1SIlsFn0OCw=="
+          "iv": "kwkCc9TmBxaLqw0k",
+          "cipher": "Qdic75jGHDuOqSMaM6XKUuAIH5Zw2RdcFs4PCVbraSFogNw6CVp/1n3F5IppFV/kbB4L5aSwQvCyf0FK0wzJu9Lxwsh2LbnnKyqLcHyy4nNg/ZaR3YuA78QdiXfExqo5SKMq+MPw1zlkmfTG5w=="
         },
         "recipe-book": {
-          "iv": "5o/DRbfsUixIL8x8",
-          "cipher": "Ga3UXAvMJdQDWYNu9pA3SiSbPHRP+VtcoHwH0TmlWw4Xw9Xl6GPyyfHFzdQ7UeemFUkeSw2JlTcgjIezMOImAbVe3NKPFGPWtXMaqm5/fRbgnMz7395v/XwrOKu9uZtzhqPZTo+0AUqyDTMTWg=="
+          "iv": "JMdjCwXI8tL8/QjG",
+          "cipher": "mnvgQJA3+bByTYh6Tu361huoULMxp65/dGrxYXy3ivZmfDbiUGZv72cRtoVAqDHxGGh3EbnkBa/YoQu9SdP4RTYYCPNxvBn7SCUB6/g/34gDiKhFNcTmsc8bWmJ6l19iBZuZo3HHdBzlUMkhyQ=="
         }
       }
     },
@@ -47,12 +52,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "IOwu4DEBJSZ/wme4",
-          "cipher": "fAJ7QQCpsI+zQ9S/oMpXrrEprk5wzkwdYbrQwP2Pqb0qYNdYEd/Z7KFLccGOWe6f/cipgGnJDdkoViQfmnUGhm26gRICexBASjH87c6zUzfKIZE2o5vrHGMSoQWcJneLU3heCqyd2v3/+sRaUQ=="
+          "iv": "KLkWOzXBJayoLLvV",
+          "cipher": "+xAs8za5Oi3cfGvh8NRTZiFsAVQTpLduiOdGoi5pIoXl5FuUO9fWtG43Hsw5tBYrBDx6JtQlOkje6QpAWz34cbu/hrUBgDtMosMz/wfWwJeOhGa/BfL5dSLXCToqpn18rzORx4/A8Tj9MKTCvw=="
         },
         "recipe-book": {
-          "iv": "QxJ7oCS31g5R4O2Z",
-          "cipher": "/vqSbDV+rQcr+GYDA+sayvQc/eBkWvjy9Dl53xoOQhtlINMioP7Y+TDH2AkzA1svqYd0pSGB7yhCkLL8bdRJS6JMUXZBX/vjIKmi0Ory6RrzU4lYBFPSK+Uak9ryreKRPyEVo7HzCXE7YJBWPA=="
+          "iv": "P1LzM28XzxWm2LOk",
+          "cipher": "Q+jf7R744NXO04GAches26yJzK2RVYwL8o5CWC0mu4C7G2OCG4KyY9QgrFuKUSlNh3pRDhX414krmgr0OQ17bR6RQmxVxnjxnAsdNZZt3jTBQJysIfnRJjYpxnj6v2BrveqMH7GIFhSngCj+og=="
         }
       }
     }
