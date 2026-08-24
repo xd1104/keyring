@@ -311,7 +311,12 @@ function fieldsEditorHtml(){
       +   '<button type="button" class="fr-del" onclick="fieldDel('+i+')" aria-label="刪掉這一格">✕</button>'
       + '</div>'
       + '<div class="fr-line">'
-      +   '<input class="fr-hint" placeholder="說明（選填，會顯示在輸入框下面）" value="'+esc(f.hint)+'"'
+      /* hintHidden＝這格原本的說明看起來像金鑰，已經被 API 遮掉。這裡要給**空字串**
+       * 而不是遮罩後的警告文字，否則一存檔就把警告字串當成他的說明寫回去、
+       * 把原本那串（很可能是他金鑰的唯一副本）蓋掉。 */
+      +   '<input class="fr-hint" placeholder="'
+      +     (f.hintHidden ? '原本的說明像金鑰、已隱藏——存檔會清掉它' : '說明（選填，會顯示在輸入框下面）')
+      +     '" value="'+esc(f.hintHidden ? '' : f.hint)+'"'
       +     ' oninput="fieldSet('+i+',\'hint\',this.value)">'
       +   '<label class="fr-opt"><input type="checkbox" '+(f.optional?"checked":"")
       +     ' onchange="fieldSet('+i+',\'optional\',this.checked)"> 可以留空</label>'
@@ -598,7 +603,11 @@ function drawKeyFormMulti(a){
     return '<label class="field"><span class="fl">'+esc(f.label)+(f.optional?'（可留空）':'')+'</span>'
       + '<input id="kf-'+i+'" type="password" autocomplete="off" spellcheck="false" autocapitalize="off"'
       +   ' placeholder="'+(m.filled?'留空就不動它':'貼上金鑰')+'">'
-      + '<span class="hint">'+now+(f.hint?'　'+esc(f.hint):'')+'</span>'
+      /* ⚠️ 說明**另起一行**，不要跟「目前 …」黏在同一行：黏在一起時它讀起來像
+       *    第二個「目前的值」，同一格會出現兩個對不起來的現況（實際被回報過）。
+       *    safeHint() 另外擋掉「說明欄裡放了金鑰」那種情況。 */
+      + '<span class="hint">'+now+'</span>'
+      + (f.hint ? '<span class="hint">'+esc(KF.safeHint(f.hint))+'</span>' : '')
       + (m.filled && f.optional
           ? '<label class="fr-opt" style="margin-top:6px"><input type="checkbox" id="kc-'+i+'"> 清掉這一格</label>'
           : '')

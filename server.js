@@ -126,6 +126,20 @@ function maskToken(t) {
   return s.slice(0, 14) + '••••••••' + s.slice(-4);
 }
 
+/* 「說明」是會原樣顯示在畫面上的文字，不是放金鑰的地方。
+ * 實際踩過：一把 32 碼 TMDB 與一把 8 碼 OMDb 被貼進 hint，於是同一格上面是遮罩、
+ * 下面是明文。擋在寫入端，讓它不會再發生一次；已經存進去的**不動**（那可能是
+ * 那把金鑰的唯一副本，靜靜清掉等於幫人刪金鑰），改由顯示端遮起來。 */
+function badHint(fields) {
+  for (const f of fields || []) {
+    if (KF.looksSecret(f.hint)) {
+      return '「' + (f.label || f.key) + '」的說明看起來像一把金鑰。說明是會顯示在畫面上的文字，'
+           + '不要把金鑰貼在那裡——金鑰請用那一列的「換金鑰」填。說明可以寫格式，例如「32 碼英數」。';
+    }
+  }
+  return '';
+}
+
 /* ------------------------------------------------------------------ */
 /* 加解密（Node crypto；前端用 WebCrypto，格式必須一致）                 */
 /*   PBKDF2-SHA256 600000 次 -> 32 bytes 金鑰                           */
@@ -578,10 +592,19 @@ function viewState() {
   return {
     apps: S.apps.map((a) => {
       const fields = KF.normFields(a.fields);
+      /* ⭐ 說明（hint）是自由文字，而且是**設計來顯示在畫面上**的。實際發生過有人
+       *    把真金鑰貼進去（見 keyring-fields.js 的說明），所以這裡也要過一次遮罩：
+       *    「API 從不吐明文金鑰」這條不變式不能只管 token 那一欄，任何一個會被
+       *    原樣印到畫面上的欄位都算。hintHidden 讓編輯器知道要清空重填而不是把
+       *    警告字串當成他原本的說明存回去。 */
+      const safeFields = fields.map((f) => ({
+        key: f.key, label: f.label, optional: f.optional,
+        hint: KF.safeHint(f.hint), hintHidden: KF.looksSecret(f.hint),
+      }));
       return {
         id: a.id, name: a.name, emoji: a.emoji, url: a.url || '',
         masked: KF.maskSummary(fields, a.token, maskToken), hasToken: !!a.token,
-        fields,
+        fields: safeFields,
         /* ⭐ 每一格只給**遮罩**。後台的 HTTP API 從來不吐明文金鑰，即使 server 自己手上有——
          *    這是這個系統刻意的不變式（憑證保管系統），不要為了任何便利開這個口。
          *    「把他以前手打的那串拆回幾格」是在 server 端做完、直接存回去，明文不出這支程式。 */
@@ -754,6 +777,10 @@ async function handleApi(req, res, url) {
     if (!name) return sendJson(res, 400, { ok: false, message: '先給它一個名字' });
     /* 多欄位：後台可以宣告這個 App 要哪幾格。沒帶 fields 就是單欄位（現況，行為不變）。 */
     const wantFields = b.fields === undefined ? null : KF.normFields(b.fields);
+    if (wantFields) {
+      const badNew = badHint(wantFields);
+      if (badNew) return sendJson(res, 400, { ok: false, message: badNew });
+    }
     let a = b.id ? findApp(b.id) : null;
     if (a) {
       a.name = name; a.emoji = b.emoji || a.emoji; a.url = String(b.url || a.url || '');
@@ -761,20 +788,14 @@ async function handleApi(req, res, url) {
       const tk = composeToken(a, b);
       if (tk !== null) a.token = tk;
     } else {
-      /* 金鑰選填：Benson 的 App 都共用同一把，接新 App 不該再逼他貼一次。
-       * 沿用規則＝**最後一個有金鑰的 App 的那把**（＝他最近一次貼的）。
-       * 帶了 token 就照帶進來的（想拆開授權的能力沒有被拿掉）。 */
-      let token = String(b.token || '').trim();
-      if (!token) {
-        const donor = [...S.apps].reverse().find((x) => x.token);
-        if (!donor) {
-          return sendJson(res, 400, {
-            ok: false,
-            message: '這是第一個 App，還沒有任何金鑰可以沿用——這次要貼一把進來。之後再加 App 就會自動沿用這把了。',
-          });
-        }
-        token = donor.token;
-      }
+      /* ⛔ 這裡**刻意不沿用**別的 App 的金鑰（2026-08-24 Benson 拍板改回來）。
+       * 舊版為了省事，沒貼金鑰時會自動抄「最後一個有金鑰的 App」的那把。
+       * 那等於讓金鑰在 App 之間流動，直接違反這個專案的鐵律：
+       *   **每個 App 一把 fine-grained PAT、只授權它自己那一個 repo**。
+       * 實際後果：新登記的「電影評分」明明只需要 TMDB／OMDb 金鑰，卻被塞了一把
+       * 能寫 travel-book 的 GitHub PAT（三個 App 的 token 指紋一模一樣）。
+       * 代價是接新 App 每次都要貼一把——那正是這條界線該有的成本，不要再優化掉。 */
+      const token = String(b.token || '').trim();
       /* App id 是 Benson 自己填的代號（要跟該 App 前端的 appId 一致），一樣只收 ASCII */
       const wanted = slugify(b.appId || name);
       /* 同一個代號再登記一次，多半是打錯或忘了已經加過。以前會靜靜長出 xxx-2，
@@ -785,9 +806,14 @@ async function handleApi(req, res, url) {
       }
       const id = uniqueId(wanted || newId('app'), S.apps.map((x) => x.id));
       a = { id, name, emoji: b.emoji || '📦', url: String(b.url || ''), token, fields: wantFields || [] };
-      /* 登記時就填了各格 → 用那幾格組出來的字串蓋掉沿用來的那把 */
+      /* 多欄位的 App：金鑰是由各格組出來的，不是直接貼一串。所以「有沒有金鑰」
+       * 要等組完才算得準——不能在上面就用 b.token 是不是空的來擋。 */
       const tk0 = composeToken(a, b);
       if (tk0 !== null) a.token = tk0;
+      /* 沒帶金鑰就是「還沒有金鑰」，**不擋**：多欄位的 App 正常流程就是
+       * 先宣告欄位、再到「換金鑰」把各格填上。危險的是「沿用別的 App 的金鑰」，
+       * 不是「暫時沒有金鑰」——後者只是還不能解密，畫面會顯示「沒有金鑰」，
+       * buildKeyring() 也不會為它產出任何密文。 */
       S.apps.push(a);
       /* 他要管的只有成員：新 App 直接給所有現有使用者，要收再到「誰可以用」取消 */
       S.users.forEach((u) => {
@@ -835,6 +861,8 @@ async function handleApi(req, res, url) {
     if (!a) return sendJson(res, 404, { ok: false, message: '找不到這個 App' });
     const b = await readJson(req);
     const fields = KF.normFields(b.fields);
+    const bad = badHint(fields);
+    if (bad) return sendJson(res, 400, { ok: false, message: bad });
     a.fields = fields;
     let migrated = false;
     if (fields.length && a.token) {

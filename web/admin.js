@@ -749,7 +749,10 @@ function fieldsEditorHtml(fs, appId) {
         '<button type="button" class="fr-del" data-del="' + i + '">✕</button>' +
       '</div>' +
       '<div class="fr-line">' +
-        '<input class="fr-hint" id="fe-h' + i + '" value="' + esc(f.hint) + '" placeholder="說明（選填）">' +
+        /* hintHidden＝原本的說明看起來像金鑰、已被 API 遮掉。這裡給空字串而不是
+         * 遮罩後的警告文字，否則一存檔就把警告字串寫回去、蓋掉原本那串。 */
+        '<input class="fr-hint" id="fe-h' + i + '" value="' + esc(f.hintHidden ? "" : f.hint) +
+        '" placeholder="' + (f.hintHidden ? "原本的說明像金鑰、已隱藏——存檔會清掉它" : "說明（選填）") + '">' +
         '<label class="fr-opt"><input type="checkbox" id="fe-o' + i + '"' + (f.optional ? " checked" : "") + '> 可留空</label>' +
       '</div></div>';
   }).join("");
@@ -924,8 +927,10 @@ function appTokenSheetMulti(a, fs) {
       return '<label class="field"><span class="fl">' + esc(f.label) + (f.optional ? "（可留空）" : "") + '</span>' +
         '<textarea id="mf-' + i + '" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="' +
         (m.filled ? "留空就不動它" : "貼上金鑰") + '"></textarea>' +
-        '<span class="hint">' + (m.filled ? "目前 " + esc(m.masked) + "，留空＝不改這一格" : "目前還沒填") +
-        (f.hint ? "　" + esc(f.hint) : "") + '</span>' +
+        /* ⚠️ 說明**另起一行**，不要跟「目前 …」黏在同一行：黏在一起時它讀起來像
+         *    第二個「目前的值」，同一格會出現兩個對不起來的現況（實際被回報過）。 */
+        '<span class="hint">' + (m.filled ? "目前 " + esc(m.masked) + "，留空＝不改這一格" : "目前還沒填") + '</span>' +
+        (f.hint ? '<span class="hint">' + esc(KF.safeHint(f.hint)) + '</span>' : "") +
         (m.filled && f.optional
           ? '<label class="fr-opt"><input type="checkbox" id="mc-' + i + '"> 清掉這一格</label>' : "") +
         '</label>';

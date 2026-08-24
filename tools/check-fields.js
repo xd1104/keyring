@@ -448,6 +448,90 @@ async function groupF() {
       scanned.some((r) => /fieldvalues/.test(r.path) && r.status === 404));
     check("F5. 遮罩本身有出現（證明畫面拿得到的是遮罩版）",
       /TMDB••••••••66/.test(stateRaw), (/(TMDB[^"]*)/.exec(stateRaw) || [])[1]);
+
+    /* ── F6〜F9：2026-08-24 補。原本的紅線只掃「金鑰欄位」那條路，
+     * 掃不到這次真的出事的地方——金鑰被貼進**說明（hint）**，而 hint 是自由文字、
+     * 會被原樣印到「換金鑰」對話框上，於是同一格上面是遮罩、下面是明文。 */
+    const HINT_SECRET = "c1209585fake41ddc7b39e075faa0a94";   /* 32 碼十六進位，長得就像 TMDB 金鑰 */
+    const HINT_SECRET2 = "8b8610fa";                          /* 8 碼，長得就像 OMDb 金鑰 */
+    const withSecretHints = [
+      { key: "tmdb", label: "TMDB 金鑰", hint: HINT_SECRET, optional: false },
+      { key: "omdb", label: "OMDb 金鑰", hint: HINT_SECRET2, optional: true },
+    ];
+    const before2 = RECORD.length;
+    const rBad = await req(port, "POST", "/apps/movie-library/fields", { fields: withSecretHints });
+    await req(port, "GET", "/state");
+    const after2 = RECORD.slice(before2);
+
+    check("F6. ★ 寫入端擋下來：說明欄位裡放金鑰會被拒絕（400）",
+      rBad.status === 400 && /說明/.test(rBad.body && rBad.body.message || ""),
+      rBad.status + " " + ((rBad.body && rBad.body.message) || "").slice(0, 60));
+
+    const hintHits = after2.filter((r) => r.raw.indexOf(HINT_SECRET) >= 0 || r.raw.indexOf(HINT_SECRET2) >= 0);
+    check("F7. ★ 就算擋下來，回應裡也不准把那串明文回音回去",
+      hintHits.length === 0, hintHits.map((r) => r.method + " " + r.path).join(", "));
+
+    /* 前 12 碼：金鑰被截斷後貼出來一樣是外洩。
+     * ⚠️ 但要扣掉**公開前綴**再取：`github_pat_`／`ghp_` 那幾個字是 GitHub 的固定招牌，
+     *    不是祕密。server.js 的 maskToken 刻意露前 14 碼就是基於這個理由
+     *    （見 keyring-fields.js 的註解：真正是祕密的每格金鑰用的是更狠的 maskField）。
+     *    不扣掉的話這條紅線會一直咬遮罩本身，變成永遠紅的雜訊——那跟永遠綠一樣沒用。 */
+    const stripPublicPrefix = (k) => k.replace(/^(github_pat_|ghp_|gho_|ghs_|ghu_)/, "");
+    const prefixes = SECRETS_IN_PLAY.map(stripPublicPrefix).filter((k) => k.length >= 12).map((k) => k.slice(0, 12));
+    const preHits = [];
+    for (const rec of RECORD.slice(from)) {
+      for (const pfx of prefixes) if (rec.raw.indexOf(pfx) >= 0) preHits.push(rec.method + " " + rec.path + " ← " + pfx);
+    }
+    check("F8. ★ 連任何一把金鑰的**前 12 碼**都不准出現",
+      preHits.length === 0, preHits.slice(0, 4).join("\n      "));
+  } finally {
+    try { s.ps.kill(); } catch (e) { }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* G. 證明 F 那條紅線真的會紅（突變測試）                                 */
+/* ------------------------------------------------------------------ */
+/* 「掃了沒抓到」有兩種可能：真的沒外洩，或者尺根本是壞的。這一組把修法
+ * 從沙箱裡的 server.js 拿掉（＝把 2026-08-24 修掉的洞放回去），再跑一次同樣的
+ * 掃描——**必須變紅**。不會紅的紅線等於沒有紅線。 */
+async function groupG() {
+  head("G  ★ 突變測試：把修法拿掉，F 的掃描必須抓到");
+  const HINT_SECRET = "d7f31a55fake92bb08c4e17099aa3b61";
+  const secrets = fakeSecrets(false);
+  const dir = makeSandbox("redproof", false);
+  fs.writeFileSync(path.join(dir, "secrets.json"), JSON.stringify(secrets, null, 2));
+
+  /* 突變：① 顯示端不再過 safeHint ② 寫入端不再擋 */
+  const sp = path.join(dir, "server.js");
+  let src = fs.readFileSync(sp, "utf8");
+  /* ⚠️ 寫入端有**兩個**入口（POST /apps 與 POST /apps/:id/fields），兩個都要拿掉，
+   * 否則金鑰在寫入時就被擋住、根本沒存進去，掃描當然抓不到——那會得到一個
+   * 「紅線壞掉」的假結論。第一版就是漏了 POST /apps 那個。 */
+  const m1 = src.includes("hint: KF.safeHint(f.hint)");
+  const m2 = src.includes("const bad = badHint(fields);");
+  const m3 = src.includes("const badNew = badHint(wantFields);");
+  src = src.replace("hint: KF.safeHint(f.hint)", "hint: f.hint")
+           .replace("const bad = badHint(fields);", "const bad = '';")
+           .replace("const badNew = badHint(wantFields);", "const badNew = '';");
+  fs.writeFileSync(sp, src);
+  check("G0. 突變真的套用了（三處都要中，不然這一組等於沒測）", m1 && m2 && m3,
+    "顯示端=" + m1 + " fields端=" + m2 + " 新增App端=" + m3);
+
+  const port = 45235;
+  const s = startServer(dir, port);
+  const from = RECORD.length;
+  try {
+    if (!(await waitUp(port))) { check("G1. server 起得來", false, s.logs.join("").slice(0, 300)); return; }
+    await req(port, "POST", "/apps", {
+      name: "紅線測試", appId: "redproof", emoji: "🧪", token: "ghp_FAKE_redproof_1",
+      fields: [{ key: "tmdb", label: "TMDB 金鑰", hint: HINT_SECRET, optional: false }],
+    });
+    await req(port, "GET", "/state");
+    const hits = RECORD.slice(from).filter((r) => r.raw.indexOf(HINT_SECRET) >= 0);
+    check("G1. ★ 拿掉修法之後，掃描確實抓到明文（證明 F6／F7 是承重的）",
+      hits.length > 0, hits.map((r) => r.method + " " + r.path).join(", ") || "一個都沒抓到 ⇒ 尺是壞的");
   } finally {
     try { s.ps.kill(); } catch (e) { }
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
@@ -619,6 +703,42 @@ function groupE() {
   check("E11. 手機後台：拆不開時有提醒，而且不預填那一串",
     /note bad/.test(sheet) && sheet.indexOf("TMDBFAKEKEY_RAW_9999_8888_7777") < 0 && /TMDB••••••••77/.test(sheet),
     (/(TMDB[^<]*)/.exec(sheet) || [])[1]);
+
+  /* ── E12〜E14：2026-08-24 補。直接重現被回報的那個畫面——
+   * 欄位的「說明」裡放了一把長得像真金鑰的字串（實際發生過），
+   * 換金鑰對話框把它原樣印在遮罩那行後面，於是同一格出現兩個對不起來的「現況」。
+   * 這裡驗的是**畫面產生器的輸出**，不是 HTTP 回應（那條在 F 組）。 */
+  const HINTKEY = "c1209585fake41ddc7b39e075faa0a94";
+  const Fh = [
+    { key: "tmdb", label: "TMDB 金鑰", hint: HINTKEY, optional: false },
+    { key: "omdb", label: "OMDb 金鑰", hint: "8b8610fa", optional: true },
+  ];
+  const MKh = KF.maskedFields(Fh, JSON.stringify({ tmdb: "TMDBFAKEKEY_UI_1111_2222_3333", omdb: "" }));
+
+  a.formState = { mode: "key", id: "movie-library", fields: Fh, masked: MKh, parsed: true, clear: [] };
+  a.drawKeyFormMulti({ name: "好雷嗎" });
+  check("E12. ★ 本機後台換金鑰：說明欄裡的金鑰不會被印到畫面上",
+    dialog.indexOf(HINTKEY) < 0 && dialog.indexOf("8b8610fa") < 0 && /看起來像一把金鑰/.test(dialog),
+    (/(⚠[^<]*)/.exec(dialog) || [])[1] || dialog.slice(0, 120));
+  check("E13. ★ 說明另起一行，不會跟「目前 …」黏成同一句（那正是兩個現況對不起來的原因）",
+    !/留空＝不改這一格[^<]*[0-9a-f]{8}/.test(dialog));
+
+  w.appTokenSheetMulti({ name: "好雷嗎", token: '{"tmdb":"TMDBFAKEKEY_UI_1111_2222_3333","omdb":""}' }, Fh);
+  check("E14. ★ 手機後台同樣不印（兩個介面同一個姿態）",
+    sheet.indexOf(HINTKEY) < 0 && sheet.indexOf("8b8610fa") < 0 && /看起來像一把金鑰/.test(sheet),
+    (/(⚠[^<]*)/.exec(sheet) || [])[1] || sheet.slice(0, 120));
+
+  /* 反向對照：正常的說明**必須**照常顯示。少了這條，上面三條可能只是因為
+   * 「說明根本沒被畫出來」才綠的——那種綠是假的。 */
+  const NORMAL = "32 碼英數，在 TMDB 的設定頁拿";
+  const Fn = [{ key: "tmdb", label: "TMDB 金鑰", hint: NORMAL, optional: false }];
+  a.formState = { mode: "key", id: "movie-library", fields: Fn,
+    masked: KF.maskedFields(Fn, JSON.stringify({ tmdb: "TMDBFAKEKEY_UI_1111_2222_3333" })), parsed: true, clear: [] };
+  a.drawKeyFormMulti({ name: "好雷嗎" });
+  const okDesk = dialog.indexOf(NORMAL) >= 0;
+  w.appTokenSheetMulti({ name: "好雷嗎", token: '{"tmdb":"TMDBFAKEKEY_UI_1111_2222_3333"}' }, Fn);
+  check("E15. 反向對照：正常的說明照常顯示（證明上面三條不是恆綠）",
+    okDesk && sheet.indexOf(NORMAL) >= 0, "本機=" + okDesk + " 手機=" + (sheet.indexOf(NORMAL) >= 0));
 }
 
 /* ------------------------------------------------------------------ */
@@ -630,6 +750,7 @@ function groupE() {
   if (wants("D")) groupD();
   if (wants("E")) groupE();
   if (wants("F")) await groupF();
+  if (wants("G")) await groupG();
   const bad = results.filter((r) => !r.ok);
   console.log("\n" + "=".repeat(64));
   console.log(bad.length

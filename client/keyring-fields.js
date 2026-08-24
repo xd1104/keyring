@@ -30,6 +30,40 @@
   function str(v) { return String(v == null ? "" : v); }
   function trim(v) { return str(v).trim(); }
 
+  /* ------------------------------------------------------------------
+   * 「說明」不是放金鑰的地方（2026-08-24 實際踩到）
+   * ------------------------------------------------------------------
+   * 宣告欄位的表單只有「代號／標題／說明」三格、**沒有值的格子**（值是之後在
+   * 「換金鑰」那個對話框填的）。那張表單看起來就像在填金鑰，所以說明框
+   * 成了最順手的地方 —— 實際發生過：一把 32 碼的 TMDB 與一把 8 碼的 OMDb
+   * 金鑰被貼進 hint，而 hint 是**設計來顯示在畫面上**的文字，後台就忠實照印，
+   * 於是同一格上面寫「目前 gith••••••••pY」（遮罩）、下面卻是一串明文。
+   *
+   * 這裡只做兩件事，刻意**不動已經存進去的資料**：
+   *   1. 顯示端用 safeHint() 換成警告（使用者才知道要自己搬走，而不是被靜靜刪掉）
+   *   2. 寫入端用 looksSecret() 擋下來，不讓同一件事再發生一次
+   * 「靜靜清掉」是不可以的——那串很可能是他那把金鑰在這個系統裡的唯一副本。
+   */
+
+  /** 這串文字看起來像不像一把金鑰（保守判定，寧可漏抓也不要誤擋正常說明）。
+   *  正常的說明幾乎一定含空白或中文（例：「API Key (v3 auth)，32 碼那組」）——
+   *  那些都不會命中。命中的是「一整串不透明字元」： */
+  function looksSecret(s) {
+    var t = trim(s);
+    if (!t) return false;
+    if (/\s/.test(t)) return false;                 /* 有空白＝是句子不是金鑰 */
+    if (/^[0-9a-f]{8,}$/i.test(t)) return true;     /* 純十六進位 ≥8：TMDB 32 碼、OMDb 8 碼都在這 */
+    if (/^[A-Za-z0-9_\-.]{16,}$/.test(t)) return true; /* 夠長的不透明字串：PAT／base64 那類 */
+    return false;
+  }
+
+  /** 顯示用的說明：像金鑰就不要印出來，改印一句叫他去搬走的話。 */
+  function safeHint(s) {
+    return looksSecret(s)
+      ? "⚠ 這一格的說明看起來像一把金鑰，已隱藏。金鑰請填在上面的輸入框，並把說明清空。"
+      : trim(s);
+  }
+
   /** 把使用者填的欄位代號正規化成安全的 key；不合格回 "" */
   function normKey(k) {
     var s = trim(k).toLowerCase().replace(/[^a-z0-9_]/g, "");
@@ -215,6 +249,7 @@
   return {
     MAX_FIELDS: MAX_FIELDS,
     normKey: normKey, normFields: normFields, isMulti: isMulti,
+    looksSecret: looksSecret, safeHint: safeHint,
     compose: compose, parse: parse, validate: validate, maskSummary: maskSummary,
     maskField: maskField, maskedFields: maskedFields, merge: merge, adoptFields: adoptFields,
     PRESETS: PRESETS, presetFor: presetFor
