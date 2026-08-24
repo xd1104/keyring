@@ -130,15 +130,7 @@ function maskToken(t) {
  * 實際踩過：一把 32 碼 TMDB 與一把 8 碼 OMDb 被貼進 hint，於是同一格上面是遮罩、
  * 下面是明文。擋在寫入端，讓它不會再發生一次；已經存進去的**不動**（那可能是
  * 那把金鑰的唯一副本，靜靜清掉等於幫人刪金鑰），改由顯示端遮起來。 */
-function badHint(fields) {
-  for (const f of fields || []) {
-    if (KF.looksSecret(f.hint)) {
-      return '「' + (f.label || f.key) + '」的說明看起來像一把金鑰。說明是會顯示在畫面上的文字，'
-           + '不要把金鑰貼在那裡——金鑰請用那一列的「換金鑰」填。說明可以寫格式，例如「32 碼英數」。';
-    }
-  }
-  return '';
-}
+function badHint(fields) { return KF.badFieldText(fields); }
 
 /* ------------------------------------------------------------------ */
 /* 加解密（Node crypto；前端用 WebCrypto，格式必須一致）                 */
@@ -598,7 +590,8 @@ function viewState() {
        *    原樣印到畫面上的欄位都算。hintHidden 讓編輯器知道要清空重填而不是把
        *    警告字串當成他原本的說明存回去。 */
       const safeFields = fields.map((f) => ({
-        key: f.key, label: f.label, optional: f.optional,
+        key: f.key, optional: f.optional,
+        label: KF.safeLabel(f.label, f.key), labelHidden: KF.looksSecret(f.label),
         hint: KF.safeHint(f.hint), hintHidden: KF.looksSecret(f.hint),
       }));
       return {

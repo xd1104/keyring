@@ -484,6 +484,22 @@ async function groupF() {
     }
     check("F8. ★ 連任何一把金鑰的**前 12 碼**都不准出現",
       preHits.length === 0, preHits.slice(0, 4).join("\n      "));
+
+    /* ── F9／F10：2026-08-24 第二次踩到。擋掉「說明」之後，金鑰改被填進**標題**——
+     * 因為那張表單只有代號／標題／說明，沒有放值的地方，人只會挑最像的那一格。
+     * 守門不能只守一個欄位，任何會被原樣印到畫面上的自由文字都要守。 */
+    const LABEL_SECRET = "a9f2c07dfake4bb1e63d80f5a1c7e204";
+    const before3 = RECORD.length;
+    const rBadL = await req(port, "POST", "/apps/movie-library/fields", {
+      fields: [{ key: "tmdb", label: LABEL_SECRET, hint: "32 碼英數", optional: false }],
+    });
+    await req(port, "GET", "/state");
+    const after3 = RECORD.slice(before3);
+    check("F9. ★ 標題欄裡放金鑰一樣被拒絕（400），訊息要指出是「標題」",
+      rBadL.status === 400 && /標題/.test((rBadL.body && rBadL.body.message) || ""),
+      rBadL.status + " " + ((rBadL.body && rBadL.body.message) || "").slice(0, 50));
+    check("F10. ★ 標題那串明文也不准回音回去",
+      after3.filter((r) => r.raw.indexOf(LABEL_SECRET) >= 0).length === 0);
   } finally {
     try { s.ps.kill(); } catch (e) { }
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
@@ -739,6 +755,23 @@ function groupE() {
   w.appTokenSheetMulti({ name: "好雷嗎", token: '{"tmdb":"TMDBFAKEKEY_UI_1111_2222_3333"}' }, Fn);
   check("E15. 反向對照：正常的說明照常顯示（證明上面三條不是恆綠）",
     okDesk && sheet.indexOf(NORMAL) >= 0, "本機=" + okDesk + " 手機=" + (sheet.indexOf(NORMAL) >= 0));
+
+  /* E16／E17：標題欄放金鑰（第二次實際發生的形狀）。標題不能整個藏掉——
+   * 那格會變成沒有名字——所以退回用代號當標題並標記。 */
+  const LABELKEY = "a9f2c07dfake4bb1e63d80f5a1c7e204";
+  const Fl = [{ key: "tmdb", label: LABELKEY, hint: "32 碼英數", optional: false }];
+  const viewFl = Fl.map((f) => ({ key: f.key, optional: f.optional, hint: f.hint,
+    label: KF.safeLabel(f.label, f.key), labelHidden: KF.looksSecret(f.label) }));
+  a.formState = { mode: "key", id: "movie-library", fields: viewFl,
+    masked: KF.maskedFields(Fl, JSON.stringify({ tmdb: "TMDBFAKEKEY_UI_1111_2222_3333" })), parsed: true, clear: [] };
+  a.drawKeyFormMulti({ name: "好雷嗎" });
+  check("E16. ★ 標題欄裡的金鑰不會被印到畫面上，那格改用代號當名字",
+    dialog.indexOf(LABELKEY) < 0 && /tmdb/.test(dialog) && /標題看起來像金鑰/.test(dialog),
+    (/(tmdb[^<]*)/.exec(dialog) || [])[1] || dialog.slice(0, 120));
+
+  a.formState = { mode: "app", fields: viewFl, appId: "movie-library" };
+  check("E17. ★ 欄位編輯器也不把它回填進輸入框（否則一存檔就把金鑰寫回去）",
+    a.fieldsEditorHtml().indexOf(LABELKEY) < 0);
 }
 
 /* ------------------------------------------------------------------ */

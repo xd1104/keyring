@@ -64,6 +64,29 @@
       : trim(s);
   }
 
+  /** 顯示用的標題。2026-08-24 第二次踩到：擋掉「說明」之後，金鑰改被填進**標題**——
+   *  因為宣告欄位的表單從頭到尾沒有讓人填值的地方，他只會挑最像的那一格。
+   *  標題不能整個藏掉（那格就沒名字了），所以退回用代號當標題並標記。 */
+  function safeLabel(label, key) {
+    return looksSecret(label) ? (trim(key) || "這一格") + "（⚠ 標題看起來像金鑰，已隱藏）" : trim(label);
+  }
+
+  /** 寫入端的守門：標題／說明都不准放金鑰。回空字串＝沒問題。 */
+  function badFieldText(fields) {
+    var list = Array.isArray(fields) ? fields : [];
+    for (var i = 0; i < list.length; i++) {
+      var f = list[i] || {};
+      var where = looksSecret(f.label) ? "標題" : (looksSecret(f.hint) ? "說明" : "");
+      if (where) {
+        return "「" + (looksSecret(f.label) ? (trim(f.key) || "其中一格") : (trim(f.label) || trim(f.key))) +
+          "」的**" + where + "**看起來像一把金鑰。這張表單只是宣告「這個 App 有哪幾格」，" +
+          "不是填金鑰的地方——金鑰要在那一列的「換金鑰」填。" +
+          "標題請寫人看的名字（例如「TMDB 金鑰」），說明可以寫格式（例如「32 碼英數」）。";
+      }
+    }
+    return "";
+  }
+
   /** 把使用者填的欄位代號正規化成安全的 key；不合格回 "" */
   function normKey(k) {
     var s = trim(k).toLowerCase().replace(/[^a-z0-9_]/g, "");
@@ -249,7 +272,7 @@
   return {
     MAX_FIELDS: MAX_FIELDS,
     normKey: normKey, normFields: normFields, isMulti: isMulti,
-    looksSecret: looksSecret, safeHint: safeHint,
+    looksSecret: looksSecret, safeHint: safeHint, safeLabel: safeLabel, badFieldText: badFieldText,
     compose: compose, parse: parse, validate: validate, maskSummary: maskSummary,
     maskField: maskField, maskedFields: maskedFields, merge: merge, adoptFields: adoptFields,
     PRESETS: PRESETS, presetFor: presetFor

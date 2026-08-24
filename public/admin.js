@@ -306,7 +306,9 @@ function fieldsEditorHtml(){
       + '<div class="fr-line">'
       +   '<input class="fr-key" placeholder="代號 tmdb" value="'+esc(f.key)+'" autocapitalize="off" spellcheck="false"'
       +     ' oninput="fieldSet('+i+',\'key\',this.value)">'
-      +   '<input class="fr-label" placeholder="標題（TMDB 金鑰）" value="'+esc(f.label)+'"'
+      +   '<input class="fr-label" placeholder="'
+      +     (f.labelHidden ? '原本的標題像金鑰、已隱藏——請改成人看的名字' : '標題（TMDB 金鑰）')
+      +     '" value="'+esc(f.labelHidden ? '' : f.label)+'"'
       +     ' oninput="fieldSet('+i+',\'label\',this.value)">'
       +   '<button type="button" class="fr-del" onclick="fieldDel('+i+')" aria-label="刪掉這一格">✕</button>'
       + '</div>'
@@ -327,7 +329,12 @@ function fieldsEditorHtml(){
     || (fs.length ? null : KF.PRESETS[0]);
   return '<div class="field"><span class="fl">金鑰要分成幾格</span>'
     + '<div class="hint" style="margin-top:0">不設就是一格（現在旅途手帳、食譜本都是這樣，畫面完全不變）。'
-    + '需要兩把金鑰的 App（例如好雷嗎的 TMDB＋OMDb）就加兩格，後台會幫你組成 App 讀得懂的格式。</div>'
+    + '需要兩把金鑰的 App（例如好雷嗎的 TMDB＋OMDb）就加兩格，後台會幫你組成 App 讀得懂的格式。'
+    /* ⚠️ 這句是踩兩次換來的：這張表單只有代號／標題／說明，**沒有放值的地方**，
+     *    所以人會很自然地把金鑰填進最像的那一格（第一次填進說明、第二次填進標題）。
+     *    講清楚它在做什麼、金鑰要去哪填，比事後擋下來重要。 */
+    + '<br><b>這裡只是宣告「有哪幾格」，不是填金鑰的地方</b>——'
+    + '存完之後在那一列按「換金鑰」才是貼金鑰的地方。</div>'
     + '<div id="fieldrows">'+rows+'</div>'
     + '<div class="fr-acts">'
     +   (fs.length < KF.MAX_FIELDS ? '<button type="button" onclick="fieldAdd()">＋ 加一格</button>' : '')

@@ -745,7 +745,8 @@ function fieldsEditorHtml(fs, appId) {
     return '<div class="fieldrow">' +
       '<div class="fr-line">' +
         '<input class="fr-key" id="fe-k' + i + '" value="' + esc(f.key) + '" placeholder="代號 tmdb" autocapitalize="off" spellcheck="false">' +
-        '<input class="fr-label" id="fe-l' + i + '" value="' + esc(f.label) + '" placeholder="標題（TMDB 金鑰）">' +
+        '<input class="fr-label" id="fe-l' + i + '" value="' + esc(f.labelHidden ? "" : f.label) +
+        '" placeholder="' + (f.labelHidden ? "原本的標題像金鑰、已隱藏——請改成人看的名字" : "標題（TMDB 金鑰）") + '">' +
         '<button type="button" class="fr-del" data-del="' + i + '">✕</button>' +
       '</div>' +
       '<div class="fr-line">' +
@@ -758,7 +759,10 @@ function fieldsEditorHtml(fs, appId) {
   }).join("");
   var preset = KF.presetFor(appId || "") || (fs.length ? null : KF.PRESETS[0]);
   return '<div class="field"><span class="fl">金鑰要分成幾格</span>' +
-    '<span class="hint">不設就是一格（旅途手帳、食譜本都是這樣，畫面完全不變）。需要兩把金鑰的 App 就加兩格。</span>' +
+    /* ⚠️ 「這裡不是填金鑰的地方」是踩兩次換來的：這張表單沒有放值的格子，
+     *    人會很自然地把金鑰填進最像的那一格（第一次說明、第二次標題）。 */
+    '<span class="hint">不設就是一格（旅途手帳、食譜本都是這樣，畫面完全不變）。需要兩把金鑰的 App 就加兩格。<br>' +
+    '<b>這裡只是宣告「有哪幾格」，不是填金鑰的地方</b>——存完之後按「換金鑰」才是貼金鑰的地方。</span>' +
     '<div id="fe-rows">' + rows + '</div>' +
     '<div class="fr-acts">' +
       (fs.length < KF.MAX_FIELDS ? '<button type="button" id="fe-add">＋ 加一格</button>' : '') +
