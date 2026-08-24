@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-24T08:48:48.170Z",
+  "updatedAt": "2026-08-24T08:51:47.700Z",
   "apps": [
     {
       "id": "travel-book",
@@ -11,6 +11,11 @@
       "id": "recipe-book",
       "name": "食譜本",
       "emoji": "🍳"
+    },
+    {
+      "id": "movie-library",
+      "name": "電影評分",
+      "emoji": "📓"
     }
   ],
   "users": [
@@ -26,12 +31,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "850TqMyGn+2/MwJY",
-          "cipher": "TdGihHzMkM05ABhHf/m0A1VEsAnHeTMcbwANWxvmKfWa7R63RG+ot2rgCgFLZIHXhLxUd8AJr+vM2+iOXg7OxTTSHJe8TIIQ3WpMecDlJMDj5t9KMSW1eRa9mCRwtGfttMaOh7XfFW4N8UNFig=="
+          "iv": "y+V+bnnc8G+KmFy0",
+          "cipher": "GmP6f56ylxcbqC1HKKcmWgqjLOsoGQNLA999S5NStspokVuN2SL/K8BrGm+ZIQOerEZwd8t3a+MeKD4Ytjfhk0Qo3wwk6nDzaCiZtfXzHm1F5mfsqh+Cp7s7B1I9j3mtc5+pG9dDpDT0E5Vj4w=="
         },
         "recipe-book": {
-          "iv": "Mj79zMxbz8UDyqUB",
-          "cipher": "ANmI+9YsC6hfBIUQxmJ6JPPMPWBvhAORwjY6rcf1lBI5lhZeSL3knLOduNV4a6ypbPLLjGbuuucOlF2oHc/8Bp/joKqTxeCdDzanntgrwHQkIFaf6fmsKtXrq3E52coA+TTdZktrW8plv3yKCQ=="
+          "iv": "SKb8/ufFBAycUVr4",
+          "cipher": "oczn6Z8LxyUoXLQQXiT8I7N+AvVXQqzLXDGo5zfJ8yl0/dKmV0vE76aN5FfR4HYTKI34ZzeYXWwi9SfbBAr6s4LyKjlYB9ICD6NdRHMSDkKmejsgbbENdBb40AXTkuuupv/xpcgCsi2PipXqWg=="
         }
       }
     },
@@ -47,12 +52,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "s+arWem3ZiEh2QPh",
-          "cipher": "L9JGg+GoAu45oDiMKGKMVkANAdRpP6D8YidmQF2WMP5enPbKxsW6PLuxTERdcV3UHE0l3pInvOl517plrbzMaZlFqwc6O4l108K2kb+imermT2mmQQn4exhrcznaUzSP2+4gQ4VhY8YCq6mWdw=="
+          "iv": "3ePeOWgpTwDG0hGK",
+          "cipher": "3+FkEL/JAHKBLkrAnHn6SjU9CDSVnTQZi/kxRjz4WXW9aHpfGYBbc09D2qvHihdlkIb68/8gUigyOJCUt9NUAnugZSvY6GrypLNiVw0IUKXmAcpV6W5iN8VT8ZkMp8+1ka1MDyIZUAweDIy52g=="
         },
         "recipe-book": {
-          "iv": "u6GQLFXTYni1ZnyB",
-          "cipher": "3Q0Q92sjjJirbq4MQELCj6UBasF/Xo1EI4ewkxHgcm33UBp+bQo9ZZlp0JHfuZRQ2dmB6K9RR/kZnC1Pu6Ga2BfT5XSsgZJ7Jq9HByfD6AkkISP30JxkQp59wRDimOVX2InN5WPM2jC7usGJBg=="
+          "iv": "SCAImbcudDegPSTv",
+          "cipher": "CuNwE13xSZJqRXLFeXNyFic4LmSyeKXZXaEjcuvl+5ZUOSjEkEepeXPtOUFX5DicvDISMfn+LCane9QzxhL8CaO8QoPbtAalb+QqlYjupDaN2kZST0d6i2+joeygYDxN+mJKSoDFeK36nxqfeQ=="
         }
       }
     }
