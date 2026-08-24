@@ -495,7 +495,8 @@ function appsHtml() {
       '<div class="rc-face" style="background:#efe8db; color:#6b6154">' + esc(a.emoji || "📦") + '</div>' +
       '<div class="rc-bd"><b>' + esc(a.name) + '</b>' +
         '<div class="chips">' + (chips || '<span class="chip none">還沒給任何人</span>') + '</div>' +
-        '<div class="keyline">' + esc(a.id) + ' · ' + esc(a.token ? maskToken(a.token) : "沒有金鑰") + '</div>' +
+        '<div class="keyline">' + esc(a.id) + ' · ' +
+          esc(a.token ? KF.maskSummary(a.fields, a.token, maskToken) : "沒有金鑰") + '</div>' +
       '</div>' +
       '<button class="rc-more" data-app="' + esc(a.id) + '">⋯</button>' +
     '</div>';
@@ -708,12 +709,14 @@ function appMenu(a) {
     '<div class="menu-list">' +
       '<button id="m-edit">✏️ 改名字與樣子</button>' +
       '<button id="m-token">🔑 換一把金鑰</button>' +
+      '<button id="m-fields">🧩 金鑰欄位（分成幾格）</button>' +
       '<button id="m-users">🧑 誰可以用</button>' +
       '<button class="danger" id="m-del">🗑 把這個 App 拿掉</button>' +
     '</div>',
     function () {
       $("m-edit").onclick = function () { appSheet(a); };
       $("m-token").onclick = function () { appTokenSheet(a); };
+      $("m-fields").onclick = function () { appFieldsSheet(a); };
       $("m-users").onclick = function () { appUsersSheet(a); };
       $("m-del").onclick = function () {
         confirmSheet("把「" + a.name + "」拿掉？",
@@ -730,10 +733,104 @@ function appMenu(a) {
     });
 }
 
+/* ------------------------------------------------------------------ */
+/* 多欄位金鑰（共用邏輯在 ../client/keyring-fields.js，跟本機後台同一份）  */
+/* 沒有宣告欄位的 App（旅途手帳、食譜本）完全走原本那條路。                */
+/* ------------------------------------------------------------------ */
+var KF = window.KeyringFields;
+
+/* fs 是 [{key,label,hint,optional}]；redrawFn 是「加一格／刪一格」之後要重畫哪個 sheet */
+function fieldsEditorHtml(fs, appId) {
+  var rows = fs.map(function (f, i) {
+    return '<div class="fieldrow">' +
+      '<div class="fr-line">' +
+        '<input class="fr-key" id="fe-k' + i + '" value="' + esc(f.key) + '" placeholder="代號 tmdb" autocapitalize="off" spellcheck="false">' +
+        '<input class="fr-label" id="fe-l' + i + '" value="' + esc(f.label) + '" placeholder="標題（TMDB 金鑰）">' +
+        '<button type="button" class="fr-del" data-del="' + i + '">✕</button>' +
+      '</div>' +
+      '<div class="fr-line">' +
+        '<input class="fr-hint" id="fe-h' + i + '" value="' + esc(f.hint) + '" placeholder="說明（選填）">' +
+        '<label class="fr-opt"><input type="checkbox" id="fe-o' + i + '"' + (f.optional ? " checked" : "") + '> 可留空</label>' +
+      '</div></div>';
+  }).join("");
+  var preset = KF.presetFor(appId || "") || (fs.length ? null : KF.PRESETS[0]);
+  return '<div class="field"><span class="fl">金鑰要分成幾格</span>' +
+    '<span class="hint">不設就是一格（旅途手帳、食譜本都是這樣，畫面完全不變）。需要兩把金鑰的 App 就加兩格。</span>' +
+    '<div id="fe-rows">' + rows + '</div>' +
+    '<div class="fr-acts">' +
+      (fs.length < KF.MAX_FIELDS ? '<button type="button" id="fe-add">＋ 加一格</button>' : '') +
+      (preset ? '<button type="button" id="fe-preset">套用「' + esc(preset.label) + '」</button>' : '') +
+      (fs.length ? '<button type="button" id="fe-clear">改回一格</button>' : '') +
+    '</div></div>';
+}
+/* 把畫面上的值收回陣列（加一格／存檔前都要先做，不然他打的字會不見） */
+function readFieldsEditor(fs) {
+  return fs.map(function (f, i) {
+    return {
+      key: $("fe-k" + i) ? $("fe-k" + i).value : f.key,
+      label: $("fe-l" + i) ? $("fe-l" + i).value : f.label,
+      hint: $("fe-h" + i) ? $("fe-h" + i).value : f.hint,
+      optional: $("fe-o" + i) ? $("fe-o" + i).checked : f.optional
+    };
+  });
+}
+function wireFieldsEditor(state, redraw) {
+  Array.prototype.forEach.call(document.querySelectorAll("[data-del]"), function (b) {
+    b.onclick = function () {
+      state.fields = readFieldsEditor(state.fields);
+      state.fields.splice(+b.getAttribute("data-del"), 1);
+      redraw();
+    };
+  });
+  if ($("fe-add")) $("fe-add").onclick = function () {
+    state.fields = readFieldsEditor(state.fields).concat([{ key: "", label: "", hint: "", optional: false }]);
+    redraw();
+  };
+  if ($("fe-clear")) $("fe-clear").onclick = function () { state.fields = []; redraw(); };
+  if ($("fe-preset")) $("fe-preset").onclick = function () {
+    var p = KF.presetFor(state.appId || "");
+    if (p) state.fields = JSON.parse(JSON.stringify(p.fields));
+    redraw();
+  };
+}
+
+/* 既有 App 的欄位設定（⚠️ 不動 token：改完按「換一把金鑰」時再把舊字串拆進各格讓他確認） */
+function appFieldsSheet(a) {
+  var st = { appId: a.id, fields: KF.normFields(a.fields) };
+  function draw() {
+    openSheet("「" + a.name + "」的金鑰欄位",
+      fieldsEditorHtml(st.fields, st.appId) +
+      '<p class="note">存下去的時候，原本那串會<b>自動拆進各格</b>（拆不開的話一個字都不會動，' +
+      '會標成「格式待確認」，等你自己填新的）。你貼過的東西不會不見。</p>' +
+      actsHtml("存起來"),
+      function () {
+        wireFieldsEditor(st, draw);
+        wireActs(function (btn) {
+          var raw = readFieldsEditor(st.fields);
+          var fields = KF.normFields(raw);
+          if (raw.length && !fields.length) return toast("那幾格的代號還沒填（只能用英文小寫，例如 tmdb）", true);
+          runSave(btn, "改了 " + a.name + " 的金鑰欄位", function () {
+            a.fields = fields;
+            /* 原地遷移：拆得開就正規化存回去；**拆不開就一個位元組都不動**（跟 server.js 同一條規則） */
+            if (fields.length && a.token) {
+              var r = KF.parse(fields, a.token);
+              if (r.ok) a.token = KF.compose(fields, r.values, r.extra);
+            }
+          });
+        });
+      });
+  }
+  draw();
+}
+
 function appSheet(a) {
-  var f = { emoji: a ? a.emoji : "📦" };
+  var f = { emoji: a ? a.emoji : "📦", fields: a ? KF.normFields(a.fields) : [], appId: a ? a.id : "" };
   var donor = null;
   for (var i = ST.P.apps.length - 1; i >= 0; i--) if (ST.P.apps[i].token) { donor = ST.P.apps[i]; break; }
+  function redraw() { f.appId = $("f-id") ? $("f-id").value.trim() : f.appId; appSheetDraw(a, f, donor); }
+  appSheetDraw(a, f, donor);
+}
+function appSheetDraw(a, f, donor) {
   openSheet(a ? "改「" + a.name + "」" : "登記一個 App",
     '<label class="field"><span class="fl">名字</span>' +
       '<input id="f-name" type="text" value="' + esc(a ? a.name : "") + '" placeholder="旅途手帳"></label>' +
@@ -745,7 +842,8 @@ function appSheet(a) {
     '<label class="field"><span class="fl">網址（選填）</span>' +
       '<input id="f-url" type="url" inputmode="url" value="' + esc(a ? (a.url || "") : "") + '" placeholder="https://…"></label>' +
     '<div class="field"><span class="fl">圖示</span>' + picksHtml("f-emoji", APP_EMOJIS, f.emoji) + '</div>' +
-    (a ? "" :
+    (a ? "" : fieldsEditorHtml(f.fields, f.appId)) +
+    (a || f.fields.length ? "" :
       '<label class="field"><span class="fl">金鑰（選填）</span>' +
       '<textarea id="f-token" autocapitalize="off" autocomplete="off" placeholder="' +
         (donor ? "留空就沿用「" + esc(donor.name) + "」那一把" : "第一個 App，這次一定要貼一把進來") + '"></textarea>' +
@@ -755,6 +853,9 @@ function appSheet(a) {
     actsHtml(),
     function () {
       wirePicks("f-emoji", function (v) { f.emoji = v; });
+      if (!a) wireFieldsEditor(f, function () {
+        f.emoji = f.emoji; appSheetDraw(a, f, donor);
+      });
       wireActs(function (btn) {
         var name = $("f-name").value.trim();
         if (!name) return toast("先給它一個名字", true);
@@ -768,14 +869,18 @@ function appSheet(a) {
         if (wanted && appById(wanted)) {
           return toast("已經有一個代號叫「" + wanted + "」的 App 了", true);
         }
-        var token = $("f-token").value.trim();
+        var rawFields = f.fields.length ? readFieldsEditor(f.fields) : [];
+        var fields = KF.normFields(rawFields);
+        if (rawFields.length && !fields.length) return toast("那幾格的代號還沒填（只能用英文小寫，例如 tmdb）", true);
+        var token = $("f-token") ? $("f-token").value.trim() : "";
         if (!token) {
-          if (!donor) return toast("這是第一個 App，還沒有金鑰可以沿用 —— 這次要貼一把進來", true);
-          token = donor.token;
+          if (fields.length) token = "";                 /* 分格的 App：登記完再按「換一把金鑰」一格一格填 */
+          else if (!donor) return toast("這是第一個 App，還沒有金鑰可以沿用 —— 這次要貼一把進來", true);
+          else token = donor.token;
         }
         runSave(btn, "登記了 " + name, function () {
           var id = uniqueId(wanted || newId("app"), ST.P.apps.map(function (x) { return x.id; }));
-          ST.P.apps.push({ id: id, name: name, emoji: f.emoji, url: url, token: token });
+          ST.P.apps.push({ id: id, name: name, emoji: f.emoji, url: url, token: token, fields: fields });
           /* 新 App 直接給所有現有成員，要收再到「誰可以用」取消 */
           ST.P.users.forEach(function (u) {
             if (!Array.isArray(u.apps)) u.apps = [];
@@ -787,6 +892,8 @@ function appSheet(a) {
 }
 
 function appTokenSheet(a) {
+  var fs = KF.normFields(a.fields);
+  if (fs.length) return appTokenSheetMulti(a, fs);
   openSheet("換「" + a.name + "」的金鑰",
     '<p class="note">貼新的進去，所有人的密文都會用新金鑰重產一次。' +
       '他們不用重新解鎖 —— 裝置記著的是派生金鑰，下次開 App 會自動換過去。</p>' +
@@ -799,6 +906,51 @@ function appTokenSheet(a) {
         var token = $("f-token").value.trim();
         if (!token) return toast("先貼上新的金鑰", true);
         runSave(btn, "換了 " + a.name + " 的金鑰", function () { a.token = token; });
+      });
+    });
+}
+
+/* 多欄位版。⚠️ 跟本機後台同一個姿態：**畫面上只有遮罩，留空＝不改這一格**。
+ * 手機這邊雖然自己解得開真本（明文本來就在這台裝置的記憶體裡），但畫面不預填、不顯示明文——
+ * 兩個後台的行為要一致，而且被人瞄到螢幕的成本太高。 */
+function appTokenSheetMulti(a, fs) {
+  var mk = KF.maskedFields(fs, a.token);
+  var ok = KF.parse(fs, a.token).ok;
+  openSheet("「" + a.name + "」的金鑰",
+    (ok ? "" : '<p class="note bad">這個 App 存的還是舊格式（一整串）。上面第一格顯示的就是那一串，' +
+      '把它換成正確的值再存一次就好 —— 在你按存起來之前，原本的東西一個字都不會動。</p>') +
+    fs.map(function (f, i) {
+      var m = mk[i] || {};
+      return '<label class="field"><span class="fl">' + esc(f.label) + (f.optional ? "（可留空）" : "") + '</span>' +
+        '<textarea id="mf-' + i + '" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="' +
+        (m.filled ? "留空就不動它" : "貼上金鑰") + '"></textarea>' +
+        '<span class="hint">' + (m.filled ? "目前 " + esc(m.masked) + "，留空＝不改這一格" : "目前還沒填") +
+        (f.hint ? "　" + esc(f.hint) : "") + '</span>' +
+        (m.filled && f.optional
+          ? '<label class="fr-opt"><input type="checkbox" id="mc-' + i + '"> 清掉這一格</label>' : "") +
+        '</label>';
+    }).join("") +
+    '<p class="note">存進去的還是同一串字（後台幫你組好），所以那個 App 不用改任何東西。' +
+      '他們也不用重新解鎖。</p>' +
+    actsHtml("存起來"),
+    function () {
+      wireActs(function (btn) {
+        var typed = {}, clear = [], touched = false, bad = "";
+        fs.forEach(function (f, i) {
+          var v = $("mf-" + i) ? $("mf-" + i).value.trim() : "";
+          var cl = $("mc-" + i) && $("mc-" + i).checked;
+          if (v) { typed[f.key] = v; touched = true; }
+          if (cl) { clear.push(f.key); touched = true; }
+          if (!f.optional && !v && !(mk[i] && mk[i].filled)) bad = bad || ("「" + f.label + "」還沒填");
+          if (!f.optional && cl) bad = bad || ("「" + f.label + "」是必填的，不能清掉");
+        });
+        if (bad) return toast(bad, true);
+        if (!touched) return toast("沒有改到任何一格", true);
+        var cur = KF.parse(fs, a.token);
+        var next = KF.merge(fs, cur.values, typed, clear);
+        var v2 = KF.validate(fs, next);
+        if (!v2.ok) return toast(v2.message, true);
+        runSave(btn, "換了 " + a.name + " 的金鑰", function () { a.token = KF.compose(fs, next, cur.extra); });
       });
     });
 }

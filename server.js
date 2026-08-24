@@ -30,6 +30,10 @@ const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+/* 多欄位金鑰的共用邏輯（後台 UI 的「幾格」←→「一串」互轉）。
+ * 三個地方共用同一份：這裡、public/admin.js、web/admin.js。
+ * ⚠️ 它只影響「後台怎麼收集那串字」，儲存與加密格式一個位元組都沒變。 */
+const KF = require('./client/keyring-fields.js');
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -203,7 +207,10 @@ function buildVaultPayload() {
   return {
     version: 1,
     updatedAt: S.updatedAt,
-    apps: S.apps.map((a) => ({ id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '' })),
+    apps: S.apps.map((a) => ({
+      id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
+      fields: KF.normFields(a.fields),
+    })),
     users: S.users.map((u) => ({
       id: u.id, name: u.name, emoji: u.emoji, theme: u.theme,
       salt: u.salt, dk: u.dk, apps: (u.apps || []).slice(),
@@ -241,6 +248,9 @@ function adoptPayload(p) {
     updatedAt: p.updatedAt || new Date().toISOString(),
     apps: (p.apps || []).map((a) => ({
       id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
+      /* ⚠️ 他手機上還快取著的**舊版後台**不認得 fields，送上來的資料根本沒有這個鍵。
+       *    那是「這版不認得」不是「他要清空」→ 保留這台電腦原本的宣告（規則在 KF.adoptFields）。 */
+      fields: KF.adoptFields(a, S.apps.find((x) => x.id === a.id)),
     })),
     users: (p.users || []).map((u) => ({
       id: u.id, name: u.name, emoji: u.emoji, theme: u.theme,
@@ -275,6 +285,8 @@ function loadSecrets() {
       github: { token: (d.github && d.github.token) || '' },
     };
     S.users.forEach((u) => { if (!Array.isArray(u.apps)) u.apps = []; });
+    /* 舊的 secrets.json 沒有 fields → 一律正規化成 []（＝單欄位，行為完全不變） */
+    S.apps.forEach((a) => { a.fields = KF.normFields(a.fields); });
   } catch (e) {
     if (e.code !== 'ENOENT') console.error('[secrets] 讀取失敗，改用空的鑰匙圈：', e.message);
     S = { version: 1, updatedAt: null, apps: [], users: [], github: { token: '' } };
@@ -286,7 +298,10 @@ async function saveSecrets(keepStamp) {
   await writeFileAtomic(SECRETS_FILE, JSON.stringify(S, null, 2) + '\n');
 }
 
-/* 產出公開的 keyring.json：只有密文 */
+/* 產出公開的 keyring.json：只有密文
+ * ⚠️ 多欄位金鑰**刻意不改這裡**：欄位宣告是後台自己的事（存在 secrets.json／vault.json），
+ *    公開檔的結構維持原樣，client/keyring-unlock.js 與三個 App 都不用動。
+ *    加密的還是「一個 App 一串字」，只是那串字現在由後台幫他組好。 */
 function buildKeyring() {
   return {
     version: 1,
@@ -561,11 +576,21 @@ async function beforeChange() {
 /* ------------------------------------------------------------------ */
 function viewState() {
   return {
-    apps: S.apps.map((a) => ({
-      id: a.id, name: a.name, emoji: a.emoji, url: a.url || '',
-      masked: maskToken(a.token), hasToken: !!a.token,
-      users: S.users.filter((u) => (u.apps || []).indexOf(a.id) >= 0).map((u) => u.id),
-    })),
+    apps: S.apps.map((a) => {
+      const fields = KF.normFields(a.fields);
+      return {
+        id: a.id, name: a.name, emoji: a.emoji, url: a.url || '',
+        masked: KF.maskSummary(fields, a.token, maskToken), hasToken: !!a.token,
+        fields,
+        /* ⭐ 每一格只給**遮罩**。後台的 HTTP API 從來不吐明文金鑰，即使 server 自己手上有——
+         *    這是這個系統刻意的不變式（憑證保管系統），不要為了任何便利開這個口。
+         *    「把他以前手打的那串拆回幾格」是在 server 端做完、直接存回去，明文不出這支程式。 */
+        fieldsMasked: fields.length ? KF.maskedFields(fields, a.token) : [],
+        /* 多欄位的 App 才會有：那串字目前拆不拆得開（拆不開時後台要提醒他確認） */
+        fieldsOk: fields.length ? KF.parse(fields, a.token).ok : true,
+        users: S.users.filter((u) => (u.apps || []).indexOf(a.id) >= 0).map((u) => u.id),
+      };
+    }),
     users: S.users.map((u) => ({
       id: u.id, name: u.name, emoji: u.emoji, theme: u.theme, apps: (u.apps || []).slice(),
     })),
@@ -590,6 +615,17 @@ function vaultState() {
 
 function findUser(id) { return S.users.find((u) => u.id === id) || null; }
 function findApp(id) { return S.apps.find((a) => a.id === id) || null; }
+
+/* 從請求裡取出「要存進 token 的那一串字」。
+ * 多欄位 App 收 values（幫他組），單欄位收 token（原樣）。都沒帶就回 null＝不要動它。 */
+function composeToken(app, b) {
+  const fields = KF.normFields(app && app.fields);
+  if (fields.length && b && b.values && typeof b.values === 'object') {
+    return KF.compose(fields, b.values, b.extra || {});
+  }
+  const t = String((b && b.token) || '').trim();
+  return t ? t : null;
+}
 
 /* ------------------------------------------------------------------ */
 /* API                                                                 */
@@ -716,10 +752,14 @@ async function handleApi(req, res, url) {
     const b = await readJson(req);
     const name = String(b.name || '').trim();
     if (!name) return sendJson(res, 400, { ok: false, message: '先給它一個名字' });
+    /* 多欄位：後台可以宣告這個 App 要哪幾格。沒帶 fields 就是單欄位（現況，行為不變）。 */
+    const wantFields = b.fields === undefined ? null : KF.normFields(b.fields);
     let a = b.id ? findApp(b.id) : null;
     if (a) {
       a.name = name; a.emoji = b.emoji || a.emoji; a.url = String(b.url || a.url || '');
-      if (b.token) a.token = String(b.token).trim();
+      if (wantFields) a.fields = wantFields;
+      const tk = composeToken(a, b);
+      if (tk !== null) a.token = tk;
     } else {
       /* 金鑰選填：Benson 的 App 都共用同一把，接新 App 不該再逼他貼一次。
        * 沿用規則＝**最後一個有金鑰的 App 的那把**（＝他最近一次貼的）。
@@ -744,7 +784,10 @@ async function handleApi(req, res, url) {
           message: '已經有一個代號叫「' + wanted + '」的 App 了。要改它的名字或金鑰請在那一列按「換金鑰」，不要重新登記一次。' });
       }
       const id = uniqueId(wanted || newId('app'), S.apps.map((x) => x.id));
-      a = { id, name, emoji: b.emoji || '📦', url: String(b.url || ''), token };
+      a = { id, name, emoji: b.emoji || '📦', url: String(b.url || ''), token, fields: wantFields || [] };
+      /* 登記時就填了各格 → 用那幾格組出來的字串蓋掉沿用來的那把 */
+      const tk0 = composeToken(a, b);
+      if (tk0 !== null) a.token = tk0;
       S.apps.push(a);
       /* 他要管的只有成員：新 App 直接給所有現有使用者，要收再到「誰可以用」取消 */
       S.users.forEach((u) => {
@@ -761,11 +804,49 @@ async function handleApi(req, res, url) {
     const a = findApp(decodeURIComponent(mt[1]));
     if (!a) return sendJson(res, 404, { ok: false, message: '找不到這個 App' });
     const b = await readJson(req);
-    const token = String(b.token || '').trim();
-    if (!token) return sendJson(res, 400, { ok: false, message: '先貼上新的金鑰' });
-    a.token = token;
+    const fields = KF.normFields(a.fields);
+    if (fields.length) {
+      /* 多欄位：**只進不出**。前端只送「他這次真的打了字的那幾格」與「他按了清掉的那幾格」，
+       * 現在的值由 server 自己從 token 拆出來合併——明文一步都不離開這支程式。 */
+      const cur = KF.parse(fields, a.token);
+      const next = KF.merge(fields, cur.values, b.values || {}, b.clear || []);
+      const v = KF.validate(fields, next);
+      if (!v.ok) return sendJson(res, 400, { ok: false, message: v.message });
+      a.token = KF.compose(fields, next, cur.extra);
+    } else {
+      const token = String(b.token || '').trim();
+      if (!token) return sendJson(res, 400, { ok: false, message: '先貼上新的金鑰' });
+      a.token = token;
+    }
     await commitChanges();
     return sendJson(res, 200, { ok: true, state: viewState() });
+  }
+
+  /* 欄位宣告：把一個 App 從「一格」改成「幾格」（或改回去）。
+   * ⭐ **原地遷移**：他以前手打的那串 JSON，在 server 這邊當場拆成各格、正規化之後存回去
+   *    （少宣告的鍵補空字串、宣告以外的鍵原樣留著）。明文一步都不離開這支程式。
+   * ⚠️ **拆不開的時候一個位元組都不動**：那串字原樣留著（畫面上會標「格式待確認」、
+   *    整串當成第一格顯示），等他自己送新值進來再改。
+   *    絕對不要在這裡把拆不開的東西改寫成 JSON —— 那等於在他還沒確認之前就動了他的資料，
+   *    而且他按「改回一格」也救不回原本那串。 */
+  mt = p.match(/^\/apps\/([^/]+)\/fields$/);
+  if (mt && m === 'POST') {
+    const a = findApp(decodeURIComponent(mt[1]));
+    if (!a) return sendJson(res, 404, { ok: false, message: '找不到這個 App' });
+    const b = await readJson(req);
+    const fields = KF.normFields(b.fields);
+    a.fields = fields;
+    let migrated = false;
+    if (fields.length && a.token) {
+      const r = KF.parse(fields, a.token);
+      if (r.ok) {
+        const next = KF.compose(fields, r.values, r.extra);
+        migrated = next !== a.token;
+        a.token = next;
+      }
+    }
+    await commitChanges();
+    return sendJson(res, 200, { ok: true, migrated, state: viewState() });
   }
 
   mt = p.match(/^\/apps\/([^/]+)\/users$/);
@@ -836,6 +917,12 @@ function serveStatic(req, res, url) {
   // 前端解鎖模組的正本放這裡，各 App 複製過去用
   if (rel === '/keyring-unlock.js') {
     return streamFile(res, path.join(ROOT, 'client', 'keyring-unlock.js'), { 'Access-Control-Allow-Origin': '*' });
+  }
+  // 多欄位金鑰的共用邏輯：兩個後台都載它。
+  // 手機後台在 GitHub Pages 上是用 ../client/keyring-fields.js 抓（repo 根目錄就在那），
+  // 本機預覽時 /web/ 是從 WEB_DIR 服務的，所以這裡把兩種路徑都接住。
+  if (rel === '/keyring-fields.js' || rel === '/client/keyring-fields.js') {
+    return streamFile(res, path.join(ROOT, 'client', 'keyring-fields.js'), { 'Access-Control-Allow-Origin': '*' });
   }
 
   const file = path.join(PUBLIC_DIR, path.normalize(rel).replace(/^([/\\])+/, ''));

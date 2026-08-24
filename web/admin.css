@@ -137,3 +137,14 @@ h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
   z-index:90; max-width:calc(100vw - 32px); text-align:center; line-height:1.5; transition:opacity .25s;}
 #toast.bad{background:var(--bad);}
 #toast.hidden{opacity:0; pointer-events:none;}
+
+/* 多欄位金鑰的欄位編輯器（跟本機後台同一套版面） */
+.fieldrow{border:1px solid var(--line);border-radius:10px;padding:8px;margin-bottom:8px;background:#fbf9f5;}
+.fr-line{display:flex;gap:8px;align-items:center;}
+.fr-line+.fr-line{margin-top:6px;}
+.fr-line input[type=text],.fr-line input:not([type]){flex:1;min-width:0;}
+.fr-key{flex:0 0 34%;}
+.fr-del{flex:0 0 auto;width:38px;height:38px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--muted);}
+.fr-opt{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;}
+.fr-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;}
+.fr-acts button{min-height:38px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:#fff;font-size:13.5px;color:var(--ink);}

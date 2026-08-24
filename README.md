@@ -117,6 +117,8 @@ Pages 是純靜態、**沒有伺服器可以驗密碼**。所以：
 ```
 
 - 一個人一個 salt（一組密碼派生一把金鑰，用來加密他所有 App 的 PAT）；每個 App 條目各自的 iv。
+- **公開檔裡沒有「欄位宣告」**：一個 App 要幾把金鑰是**後台自己的事**（存在 `secrets.json`／`vault.json`），
+  公開的 `keyring.json` 永遠只有 `{id,name,emoji}` ＋ 密文。見下面「一個 App 要兩把金鑰」。
 - **`id` 一律是 ASCII**（使用者 `u-<ts36>`、App 用 Benson 填的代號），顯示用的原文放 `name`。
   中文／日韓文當 id 會在不同系統之間被正規化成不同字串而分裂成兩筆——travel-book 吃過這個虧。
 - `cipher` ＝ AES-GCM 密文 ‖ 16 bytes authTag（WebCrypto 的格式，Node 端要自己接上去）。
@@ -148,6 +150,47 @@ Pages 是純靜態、**沒有伺服器可以驗密碼**。所以：
 
 加解密參數（PBKDF2-SHA256 600000 ＋ AES-GCM 256）在 `server.js`、`client/keyring-unlock.js`、
 `web/admin.js` **三個地方**各有一份實作，改要三邊一起改。
+
+## 一個 App 要兩把金鑰（多欄位）
+
+有些 App 不只要一把鑰匙 —— 例如「好雷嗎」要 **TMDB ＋ OMDb** 兩把。
+以前的做法是叫 Benson 在那一格手打 `{"tmdb":"…","omdb":"…"}` 一整行；現在後台**直接給他兩格**。
+
+**做法（刻意選最小風險的那一種）**：
+每個 App 可以宣告自己要哪幾格（`apps[].fields`），**後台的 UI 幫他把幾格組成那一串 JSON**。
+
+- **儲存與加密格式一個位元組都沒變**：加密的還是「一個 App 一串不透明字串」。
+- 所以 **`keyring.json` 的結構、`client/keyring-unlock.js` 的解密流程、三個 App 的前端都不用動**。
+- **沒有宣告 `fields` 的 App（旅途手帳、食譜本）行為與畫面完全不變**（`tools/check-fields.js` 的 B 組
+  會拿改動前的 `server.js` 產一次 `keyring.json` 逐項比對，證明這件事）。
+
+```jsonc
+// secrets.json / vault.json 裡的 apps[] （公開的 keyring.json 沒有這一段）
+{ "id": "movie-library", "name": "好雷嗎", "emoji": "🎬", "token": "{\"tmdb\":\"…\",\"omdb\":\"…\"}",
+  "fields": [
+    { "key": "tmdb", "label": "TMDB 金鑰", "hint": "API Key (v3 auth)", "optional": false },
+    { "key": "omdb", "label": "OMDb 金鑰", "hint": "沒有就留空",        "optional": true  }
+  ] }
+```
+
+**後台怎麼用**（兩個後台一樣）：登記 App 時按「＋ 加一格」，或直接按現成的
+「套用『好雷嗎（TMDB ＋ OMDb）』」；已經登記過的 App 用那一列的 **「金鑰欄位」**（手機是 ⋯ →「🧩 金鑰欄位」）。
+設好之後按「換金鑰」就會看到兩格。
+
+- **按下「存起來」的時候，後台會當場把原本那串拆進各格**（少宣告的鍵補空字串、
+  宣告以外的鍵原樣留著）。**拆不開的話一個位元組都不動**，只標成「格式待確認」，
+  等他自己填新的——**永遠不會靜靜清掉他貼過的東西**。
+- **畫面上永遠只看得到遮罩**（`tmdb TMDB••••••••33 · omdb ••••••••`）。
+  後台的 HTTP API **從來不吐明文金鑰**，即使 server 自己手上有——這是這個系統刻意的不變式，
+  `tools/check-fields.js` 的 F 組會掃描所有回應把它釘死。
+  所以換金鑰是「**留空＝不改這一格**」：只送新值上去，原值由後台自己合併。
+- 多欄位的遮罩比 GitHub PAT 那套更狠（最多前 4 後 2，8 碼以下整條遮掉）：
+  TMDB／OMDb 的金鑰**整串都是祕密**，不像 `github_pat_11AB…` 前面十幾碼是公開前綴。
+- 他手機上如果還快取著**舊版**的 `web/admin.js`，從手機存檔**不會**把欄位宣告洗掉
+  （舊版送上來的資料沒有 `fields` 這個鍵＝「這版不認得」，後台會保留原本的宣告）。
+  不過還是建議合併之後在手機上把那頁重新整理一次。
+- 欄位代號只收英文小寫（`tmdb`、`omdb`），跟 App id 同一條鐵律。
+- 那個 App 的前端自己負責把那串 JSON 拆成兩把（好雷嗎已經這樣做了）。
 
 ## 別的 App 要導入（三步）
 
@@ -211,9 +254,16 @@ fine-grained PAT，Repository access 只勾 matrix 裡那幾個 repo，權限只
 ### 改完模組請跑機器驗收
 
 ```
-node tools/check-unlock.js            # 全部 38 條
+node tools/check-unlock.js            # 全部 38 條（要 Chrome ＋ 旁邊的 travel-planner／recipe-book）
 node tools/check-unlock.js --only=A,B # 只跑某幾組
+
+node tools/check-fields.js            # 多欄位金鑰 68 條（純 node，零依賴，哪台機器都跑得動）
+node tools/check-fields.js --only=B   # A 邏輯／B 向後相容／C 後台 API／D 模組 CSS／E 後台畫面／F 紅線：回應不含明文
 ```
+
+`check-fields.js`（A 邏輯／B 向後相容／C 後台 API／D 模組 CSS／E 兩個後台的畫面／F 紅線）全程用假金鑰、只在 `os.tmpdir()` 底下讀寫，**不會碰到
+`keyring.json`／`vault.json`／`secrets.json`**。它的 B 組會用 `git show main:server.js`
+把**改動前**的後台叫出來跑一次，兩份 `keyring.json` 逐項比對 —— 這是「舊 App 沒被影響」的機器證明。
 
 零依賴（自己開 headless Chrome ＋ 本機測試宿主，用假 token 跑真的 PBKDF2＋AES-GCM）。
 它守的是：密度 class 底下不准有動畫、`#kr-full` 讀宿主變數必須 0（**走 live CSSOM 不是 grep**——

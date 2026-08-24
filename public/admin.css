@@ -141,3 +141,14 @@ h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
 .pub-btn.sub{background:#f3eee4; color:#6b6154; box-shadow:none;}
 .pub-list{width:100%; border-top:1px dashed var(--warn-line); padding-top:10px; margin-top:2px;}
 .pub-list li{font-size:13px; color:var(--warn); padding:3px 0; line-height:1.6; overflow-wrap:anywhere;}
+
+/* 多欄位金鑰的欄位編輯器（登記 App／金鑰欄位共用） */
+.fieldrow{border:1px solid var(--line);border-radius:10px;padding:8px;margin-bottom:8px;background:#fbf9f5;}
+.fr-line{display:flex;gap:8px;align-items:center;}
+.fr-line+.fr-line{margin-top:6px;}
+.fr-line input[type=text],.fr-line input:not([type]){flex:1;min-width:0;}
+.fr-key{flex:0 0 34%;}
+.fr-del{flex:0 0 auto;width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--muted);}
+.fr-opt{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;}
+.fr-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;}
+.fr-acts button{min-height:36px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:#fff;font-size:13.5px;color:var(--ink);}

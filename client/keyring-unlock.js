@@ -469,12 +469,25 @@
     + '#kr-full .kr-lb{font-size:15px; font-weight:600;}'
     + '#kr-full .kr-lb small{display:block; font-size:12.5px; color:var(--krs-mut); font-weight:500;'
     + ' margin-top:2px; line-height:1.5;}'
-    /* ── 按鈕：主鈕是暖白底＋深字，刻意不是珊瑚／橘（那是 App 的顏色，這一層沒有） ── */
+    /* ── 按鈕：主鈕是暖白底＋深字，刻意不是珊瑚／橘（那是 App 的顏色，這一層沒有） ──
+     * ⭐ 2026-08-24：這三顆（.kr-go/.kr-ghost/.kr-danger）以前**沒有宣告自己的 padding**，
+     *   宿主只要有一條 `button{padding:0}` 這種 reset，字就會貼著邊——好雷嗎的 QA 連兩輪抓到。
+     *   ⚠️ 這不是權重輸了：`#kr-full .kr-x` 是 (1,1,0)，壓得過宿主任何 `button{}`／`.btn{}`。
+     *      **是我們根本沒寫那個屬性**，沒寫就沒有東西可以壓，宿主的宣告直接生效。
+     *      所以修法是「把會被繼承／被 reset 的屬性通通寫死」，不是再加一次 class：
+     *      層內的權重規則照舊維持 `#kr-full .kr-x{}`（見檔頭 CSS 那段的約定），
+     *      層外的藥丸才需要 `.kr-chip.kr-chip` 自我加倍——那裡沒有 id 可以綁。
+     *   以後在這一層新增任何按鈕，照抄下面這組「宿主滲漏防護」。 */
     + '#kr-full .kr-go{width:100%; min-height:54px; border-radius:15px;'
     + ' background-color:var(--krs-btn);'
     + ' background-image:linear-gradient(180deg, rgba(255,255,255,.60), rgba(255,255,255,0) 58%);'
     + ' color:var(--krs-btn-ink); font-size:16.5px; font-weight:800; display:flex; align-items:center;'
-    + ' justify-content:center; gap:9px; margin-top:6px;'
+    + ' justify-content:center; gap:9px; margin:6px 0 0; padding:0 18px;'
+    + ' font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;'
+    + ' line-height:1.3; letter-spacing:normal; text-align:center; text-decoration:none; text-transform:none;'
+    + ' text-indent:0; text-shadow:none; word-spacing:normal; font-style:normal; font-variant:normal;'
+    + ' box-sizing:border-box; cursor:pointer; -webkit-appearance:none; appearance:none; border:0;'
+    + ' -webkit-tap-highlight-color:transparent; -webkit-text-size-adjust:100%; text-size-adjust:100%;'
     + ' box-shadow:0 6px 20px rgba(0,0,0,.30), inset 0 -1px 0 rgba(0,0,0,.05);'
     + ' transition:transform .14s var(--krs-ease), box-shadow .18s var(--krs-ease), opacity .18s;}'
     + '#kr-full .kr-go:active{transform:scale(.985); box-shadow:0 3px 10px rgba(0,0,0,.26);}'
@@ -482,14 +495,26 @@
     /* 成功第一拍：「✓ 解開了」。要連 [disabled] 那條一起蓋掉，否則會變暗看起來像失敗 */
     + '#kr-full .kr-go.kr-ok, #kr-full .kr-go.kr-ok[disabled]{opacity:1; animation:kr-okpop .38s var(--krs-ease);}'
     + '#kr-full .kr-ghost{width:100%; min-height:54px; border-radius:15px; border:1px solid var(--krs-line);'
-    + ' background-color:var(--krs-face); color:var(--krs-ink); font-size:16px; font-weight:700; display:flex;'
-    + ' align-items:center; justify-content:center; gap:8px;'
+    + ' background-color:var(--krs-face); background-image:none; color:var(--krs-ink); font-size:16px;'
+    + ' font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px;'
+    + ' margin:0; padding:0 18px;'
+    + ' font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;'
+    + ' line-height:1.3; letter-spacing:normal; text-align:center; text-decoration:none; text-transform:none;'
+    + ' text-indent:0; text-shadow:none; word-spacing:normal; font-style:normal; font-variant:normal;'
+    + ' box-sizing:border-box; cursor:pointer; -webkit-appearance:none; appearance:none;'
+    + ' -webkit-tap-highlight-color:transparent; -webkit-text-size-adjust:100%; text-size-adjust:100%;'
     + ' transition:transform .14s var(--krs-ease), background-color .16s var(--krs-ease);}'
     + '#kr-full .kr-ghost:hover{background-color:var(--krs-facehi);}'
     + '#kr-full .kr-ghost:active{transform:scale(.985);}'
     + '#kr-full .kr-danger{width:100%; min-height:54px; border-radius:15px; background-color:var(--krs-err-bg);'
-    + ' border:1px solid var(--krs-err-line); color:var(--krs-err-ink); font-size:16px; font-weight:700;'
-    + ' display:flex; align-items:center; justify-content:center;'
+    + ' background-image:none; border:1px solid var(--krs-err-line); color:var(--krs-err-ink); font-size:16px;'
+    + ' font-weight:700; display:flex; align-items:center; justify-content:center;'
+    + ' margin:0; padding:0 18px;'
+    + ' font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;'
+    + ' line-height:1.3; letter-spacing:normal; text-align:center; text-decoration:none; text-transform:none;'
+    + ' text-indent:0; text-shadow:none; word-spacing:normal; font-style:normal; font-variant:normal;'
+    + ' box-sizing:border-box; cursor:pointer; -webkit-appearance:none; appearance:none;'
+    + ' -webkit-tap-highlight-color:transparent; -webkit-text-size-adjust:100%; text-size-adjust:100%;'
     + ' transition:transform .14s var(--krs-ease);}'
     + '#kr-full .kr-danger:active{transform:scale(.985);}'
     + '#kr-full .kr-spin{width:17px; height:17px; border-radius:50%; border:2.5px solid rgba(0,0,0,.22);'
