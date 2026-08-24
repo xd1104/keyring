@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-24T07:42:37.129Z",
+  "updatedAt": "2026-08-24T08:48:48.170Z",
   "apps": [
     {
       "id": "travel-book",
@@ -11,11 +11,6 @@
       "id": "recipe-book",
       "name": "食譜本",
       "emoji": "🍳"
-    },
-    {
-      "id": "movie-library",
-      "name": "電影評分",
-      "emoji": "📓"
     }
   ],
   "users": [
@@ -31,16 +26,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "WKDwI1VbGf8xzbp4",
-          "cipher": "EnR9Ftb4V0qgUBUEXFi+sCdJeoIhLZjyZ/aEixWs9peM0FsBCSsbzpmerzwLOg+WeECv+2Xm22j0w6/e6MxF21n73B9imiCOsJRpSyg88FU2JV5OEDF0jzthAEEgrLYR0vs7Oo/8oZ6GLP2TOg=="
+          "iv": "850TqMyGn+2/MwJY",
+          "cipher": "TdGihHzMkM05ABhHf/m0A1VEsAnHeTMcbwANWxvmKfWa7R63RG+ot2rgCgFLZIHXhLxUd8AJr+vM2+iOXg7OxTTSHJe8TIIQ3WpMecDlJMDj5t9KMSW1eRa9mCRwtGfttMaOh7XfFW4N8UNFig=="
         },
         "recipe-book": {
-          "iv": "5lyuKHmdmMF/ubDD",
-          "cipher": "wdUPRApkspfDcoxZhF44pDrznjfQGcXECt+KjV6jY+qceUdwg1UT3Ph+S9v8s4Uucp6zQRcTQrLDddbgsTNZ0LoEkOCPVhQeJ8bVOUwGz3MnrUgr+WZhplgifnhVmChfwF369ytl51soPqMYAw=="
-        },
-        "movie-library": {
-          "iv": "Aum84yr9AX29FgSf",
-          "cipher": "uiFOirSgTgWwzFzwB0qByAg0zGNR2WVHDwJnmC02UmrBLjSwfjQk9NwwBESH2uFZKw0bahFKxtWaBQe0fxo+aVY8gn4Pq9EGyJV5UZvtQOqr/MMeXKxZ1YX6c3mBym4nIp2o1+L/AX1fZ6N4Sg=="
+          "iv": "Mj79zMxbz8UDyqUB",
+          "cipher": "ANmI+9YsC6hfBIUQxmJ6JPPMPWBvhAORwjY6rcf1lBI5lhZeSL3knLOduNV4a6ypbPLLjGbuuucOlF2oHc/8Bp/joKqTxeCdDzanntgrwHQkIFaf6fmsKtXrq3E52coA+TTdZktrW8plv3yKCQ=="
         }
       }
     },
@@ -56,16 +47,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "xbfxuVfu03qih7GL",
-          "cipher": "7z3dN65yg1Duwq2EMnwe//J/blOVF3bJvh+KHrUUUP/JgGSD4oizbHGE4/jKzWUZbSd912g9neSw/MGDH7xU9OepJpw1tYC7lRUWZTjtUKuDabVfLSup70KbTNKraPVE+9rbcapV2nGTpe/JEA=="
+          "iv": "s+arWem3ZiEh2QPh",
+          "cipher": "L9JGg+GoAu45oDiMKGKMVkANAdRpP6D8YidmQF2WMP5enPbKxsW6PLuxTERdcV3UHE0l3pInvOl517plrbzMaZlFqwc6O4l108K2kb+imermT2mmQQn4exhrcznaUzSP2+4gQ4VhY8YCq6mWdw=="
         },
         "recipe-book": {
-          "iv": "i3mDG4iRJ3B/l75d",
-          "cipher": "9vB/Z3fuBbSS+NlxYxx+/O4mPdPocutdFUNeWjz1BrReVVrPdSLTLvEsjrGfoK5IXYjbbZsinf/2KfOD/4gFZnHaD5VCGG78DG43hCAm22D2gjoJhMNf5kj/fh19Ozway3Xnr+BlZgEBDP3dlg=="
-        },
-        "movie-library": {
-          "iv": "w+OPTrU5kdhJ4Sea",
-          "cipher": "Wv6IXBMsTm6jMLJtMQ8RVxT2ZQlBrKfeta+yp4wLPLcFo0g4T0Xz0+nNd5m5J09hG+5+git1jzdgLtwNawTlriEp8S06TUCAlq5QiGPwaO1T4EvdrmjTrPmsHyvekFNnT9qgd3ym4eUTCpGECw=="
+          "iv": "u6GQLFXTYni1ZnyB",
+          "cipher": "3Q0Q92sjjJirbq4MQELCj6UBasF/Xo1EI4ewkxHgcm33UBp+bQo9ZZlp0JHfuZRQ2dmB6K9RR/kZnC1Pu6Ga2BfT5XSsgZJ7Jq9HByfD6AkkISP30JxkQp59wRDimOVX2InN5WPM2jC7usGJBg=="
         }
       }
     }
