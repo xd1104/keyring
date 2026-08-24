@@ -218,6 +218,7 @@
    *   只是換了金鑰（PAT 換新）  -> 用記著的金鑰解出新的，自動換過去、不用重解鎖
    * 抓不到鑰匙圈（離線）時什麼都不動，維持現狀。 */
   function refreshFromRing() {
+    if (pub.is) return Promise.resolve();   /* 公開模式跟「某個人的密文」無關，這條路不適用 */
     if (!device) return Promise.resolve();
     return fetchRing(true).then(function () {
       var u = ringUser(device.userId);
@@ -256,9 +257,67 @@
     }).catch(function () { /* 離線：維持現狀 */ });
   }
   function notify() { if (typeof CFG.onChange === "function") { try { CFG.onChange(publicState()); } catch (e) { } } }
+  /* ==================================================================
+   * 公開模式（2026-08-24）
+   * ------------------------------------------------------------------
+   * 有些 App 用的是免費查詢金鑰（電影評分的 TMDB／OMDb），不是憑證。
+   * 後台可以把那種 App 標成「公開」：值不加密，直接放在 keyring.json 的
+   * apps[] 裡（`public:true` ＋ `plain:"<值>"`，跟 iv／cipher 明確分開）。
+   *
+   * 這種 App 在這支模組裡的行為是**整條解鎖流程都不存在**：
+   *   ・不彈解鎖層（open／maybeIntro 直接 return）
+   *   ・不畫身分藥丸（chipHtml 回空字串）
+   *   ・不跟使用者、不跟密碼有任何關係
+   *   ・值抓到就直接 writeToken 給宿主，跟解鎖成功那條路走同一個出口
+   * 宿主要問的話：Keyring.isPublic() / Keyring.whenReady()。
+   * ================================================================== */
+  var pub = { is: false, value: null, ready: false };
+  var readyWaiters = [];
+
+  function ringApp(id) {
+    var list = (ring && Array.isArray(ring.apps)) ? ring.apps : [];
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
+    return null;
+  }
+  /* 公開的值長什麼樣：apps[] 裡那一筆有 public:true 而且 plain 是字串 */
+  function publicValueOf(id) {
+    var a = ringApp(id);
+    return (a && a.public === true && typeof a.plain === "string") ? a.plain : null;
+  }
+  function markReady() {
+    pub.ready = true;
+    var ws = readyWaiters; readyWaiters = [];
+    for (var i = 0; i < ws.length; i++) { try { ws[i](publicState()); } catch (e) { } }
+  }
+  /* 抓到鑰匙圈之後套用公開模式。回傳「值有沒有變」。 */
+  function applyPublic() {
+    var v = publicValueOf(CFG.appId);
+    if (v === null) {
+      if (pub.is) {            /* 本來是公開、後台關掉了 → 清掉快取，回到正常解鎖流程 */
+        pub.is = false; pub.value = null;
+        lsDel(K("pub"));
+        if (CFG.tokenKey) { lsDel(CFG.tokenKey); ssDel(CFG.tokenKey); }
+        return true;
+      }
+      return false;
+    }
+    var changed = !pub.is || pub.value !== v;
+    pub.is = true; pub.value = v;
+    /* 公開值不是祕密（它本來就放在公開 repo），所以存 localStorage：
+       下次開站在網路回來之前就有東西可以用。 */
+    lsSet(K("pub"), v);
+    writeToken(v, true);
+    /* 這個 App 不需要身分了。裝置上如果還留著上一輪解鎖的記憶，靜靜清掉，
+       但**不要**走 forget() 那條（它會連 tokenKey 一起刪，把剛寫進去的公開值洗掉）。 */
+    if (device) { device = null; lsDel(K("device")); ssDel(K("device")); }
+    return changed;
+  }
+
   function publicState() {
-    return device ? { unlocked: true, userId: device.userId, name: device.name, emoji: device.emoji, theme: device.theme }
-      : { unlocked: false };
+    if (pub.is) return { unlocked: true, public: true, ready: pub.ready, userId: null, name: "", emoji: "", theme: "" };
+    return device
+      ? { unlocked: true, public: false, ready: pub.ready, userId: device.userId, name: device.name, emoji: device.emoji, theme: device.theme }
+      : { unlocked: false, public: false, ready: pub.ready };
   }
 
   /* ---------------- 樣式（只注入一次） ----------------
@@ -878,6 +937,8 @@
 
   /* ---------------- 解鎖畫面 ---------------- */
   function open(reason) {
+    /* 公開的 App 沒有「解鎖」這回事：打開網址就能用，不要彈任何東西 */
+    if (pub.is) return;
     ui = {
       view: "unlock", step: "who", userId: null, reason: reason || "", tries: 0,
       busy: false, done: false, shake: false, show: false, remember: true, open: true
@@ -1108,7 +1169,7 @@
 
   /* ---------------- App 畫面裡的身分藥丸 ---------------- */
   function chipHtml() {
-    if (!CFG.enabled) return "";
+    if (!CFG.enabled || pub.is) return "";   /* 公開模式沒有身分可言，不要在 App 畫面上留一顆沒用的藥丸 */
     ensureStyle();   /* 宿主可能還沒開過解鎖畫面，藥丸自己要保證有樣式 */
     /* 第三拍（見 submit）：剛解鎖完的**第一次**重繪帶 kr-new，彈出＋亮一圈。
      * 用完即丟：藥丸是宿主重繪出來的，模組只能在 HTML 上做記號，不能事後去拆 class（§4-7）。
@@ -1129,7 +1190,7 @@
 
   /* 這台裝置從來沒解鎖過、也沒看過解鎖畫面 -> 進站約 0.9 秒主動端一次，之後永遠不再自動彈 */
   function maybeIntro() {
-    if (!CFG.enabled || device || started) return;
+    if (!CFG.enabled || device || started || pub.is) return;
     if (lsGet(K("introSeen")) === "1") return;
     started = true;
     fetchRing(false).then(function () {
@@ -1154,8 +1215,25 @@
     device = readDevice();
     /* 同步把金鑰塞回 App 既有的 key，開機第一次判斷「能不能寫」就是對的 */
     if (device && device.t) writeToken(device.t, device.remember);
-    /* 背景跟鑰匙圈對一次（換金鑰自動換過去；被刪／換密碼就靜默降級） */
-    setTimeout(function () { refreshFromRing(); }, 0);
+    /* 公開模式：上次抓到的值先頂上（網路還沒回來、或根本沒網路時，App 照樣打得開）。
+       ⚠️ 這裡只是「先用著」，下面還是會跟鑰匙圈對一次，後台改了就會換過去。 */
+    var cachedPub = lsGet(K("pub"));
+    if (cachedPub) { pub.is = true; pub.value = cachedPub; writeToken(cachedPub, true); }
+    /* 背景跟鑰匙圈對一次：
+       ・公開的 App → 套用公開值（不需要密碼、不需要選人）
+       ・其他 → 原本那條（換金鑰自動換過去；被刪／換密碼就靜默降級） */
+    setTimeout(function () {
+      fetchRing(false).then(function () {
+        var changed = applyPublic();
+        if (pub.is) { markReady(); if (changed) notify(); return; }
+        markReady();
+        return refreshFromRing();
+      }, function () {
+        /* 抓不到鑰匙圈：維持現狀（快取的公開值還在用），不要把人踢回去 */
+        markReady();
+        if (pub.is) notify();
+      });
+    }, 0);
     return publicState();
   }
 
@@ -1176,7 +1254,13 @@
     chipHtml: chipHtml,
     maybeIntro: maybeIntro,
     forget: function () { forget(); notify(); },
-    isUnlocked: function () { return !!device; },
+    /* 公開模式：宿主用這兩支決定「要不要顯示解鎖入口」與「金鑰什麼時候會到」 */
+    isPublic: function () { return !!pub.is; },
+    whenReady: function () {
+      if (pub.ready) return Promise.resolve(publicState());
+      return new Promise(function (resolve) { readyWaiters.push(resolve); });
+    },
+    isUnlocked: function () { return !!device || !!pub.is; },
     current: function () { return publicState(); },
     reload: function () { return fetchRing(true); },
     /* 給測試／進階用 */

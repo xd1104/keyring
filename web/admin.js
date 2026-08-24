@@ -495,6 +495,7 @@ function appsHtml() {
       '<div class="rc-face" style="background:#efe8db; color:#6b6154">' + esc(a.emoji || "📦") + '</div>' +
       '<div class="rc-bd"><b>' + esc(a.name) + '</b>' +
         '<div class="chips">' + (chips || '<span class="chip none">還沒給任何人</span>') + '</div>' +
+        (a.public ? '<div class="keyline" style="color:#8a5b12">🌐 公開（明文放在公開 repo）</div>' : '') +
         '<div class="keyline">' + esc(a.id) + ' · ' +
           esc(a.token ? KF.maskSummary(a.fields, a.token, maskToken) : "沒有金鑰") + '</div>' +
       '</div>' +
@@ -710,6 +711,7 @@ function appMenu(a) {
       '<button id="m-edit">✏️ 改名字與樣子</button>' +
       '<button id="m-token">🔑 換一把金鑰</button>' +
       '<button id="m-fields">🧩 金鑰欄位（分成幾格）</button>' +
+      '<button id="m-public">🌐 公開模式' + (a.public ? '（目前：公開）' : '（目前：要密碼）') + '</button>' +
       '<button id="m-users">🧑 誰可以用</button>' +
       '<button class="danger" id="m-del">🗑 把這個 App 拿掉</button>' +
     '</div>',
@@ -717,6 +719,7 @@ function appMenu(a) {
       $("m-edit").onclick = function () { appSheet(a); };
       $("m-token").onclick = function () { appTokenSheet(a); };
       $("m-fields").onclick = function () { appFieldsSheet(a); };
+      $("m-public").onclick = function () { appPublicSheet(a); };
       $("m-users").onclick = function () { appUsersSheet(a); };
       $("m-del").onclick = function () {
         confirmSheet("把「" + a.name + "」拿掉？",
@@ -802,6 +805,31 @@ function wireFieldsEditor(state, redraw) {
 }
 
 /* 既有 App 的欄位設定（⚠️ 不動 token：改完按「換一把金鑰」時再把舊字串拆進各格讓他確認） */
+/* 公開模式：打開網址就能用，沒有登入畫面。⛔ 預設一律加密，公開要明確按下去。 */
+function appPublicSheet(a) {
+  var on = !!a.public;
+  var why = KF.publicBlockReason(a);
+  openSheet("「" + a.name + "」要公開嗎？",
+    '<p class="note bad">' + esc(KF.PUBLIC_WARNING).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>") + '</p>' +
+    '<p class="note">公開之後：任何人打開那個 App 的網址就能用，<b>不需要選人、不需要密碼</b>。<br>' +
+      '適合 TMDB／OMDb 這種免費查詢金鑰；GitHub token、密碼、有寫入權的東西絕對不行。</p>' +
+    (why ? '<p class="note bad">' + esc(why) + '</p>' : '') +
+    '<div class="menu-list">' +
+      (on ? '<button class="danger" id="p-off">關掉公開，改回要密碼</button>'
+          : '<button id="p-on">我知道會被看到，設成公開</button>') +
+    '</div>',
+    function () {
+      if ($("p-on")) $("p-on").onclick = function () {
+        var w = KF.publicBlockReason(a);
+        if (w) return toast(w, true);
+        runSave(null, "把 " + a.name + " 設成公開", function () { a.public = true; });
+      };
+      if ($("p-off")) $("p-off").onclick = function () {
+        runSave(null, "把 " + a.name + " 改回加密", function () { a.public = false; });
+      };
+    });
+}
+
 function appFieldsSheet(a) {
   var st = { appId: a.id, fields: KF.normFields(a.fields) };
   function draw() {

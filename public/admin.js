@@ -278,6 +278,8 @@ function adApps(){
     return '<div class="rowcard">'
       + '<div class="rc-face" style="background:'+grad("sand")+'">'+a.emoji+'</div>'
       + '<div class="rc-bd"><b>'+esc(a.name)+'</b>'
+      +   (a.public ? '<div class="keyline" style="color:#8a5b12">🌐 公開：這個 App 的金鑰是<b>明文</b>放在公開 repo，任何人都看得到</div>' : '')
+      +   (a.publicBlocked ? '<div class="keyline" style="color:#d64545">⛔ 勾了公開但被擋下來了（值看起來是 GitHub token），目前仍然是加密的</div>' : '')
       +   '<div class="keyline">'+esc(a.masked||"（還沒有金鑰）")+'</div>'
       +   ((a.fields||[]).length && a.fieldsOk===false
             ? '<div class="keyline" style="color:#8a5b12">⚠ 這個 App 分了 '+a.fields.length+' 格，但存的東西還是舊格式 —— 按「換金鑰」確認一次</div>' : '')
@@ -285,6 +287,7 @@ function adApps(){
       + '<div class="rc-acts">'
       +   '<button onclick="openKeyForm(\''+a.id+'\')">換金鑰</button>'
       +   '<button onclick="openFieldsForm(\''+a.id+'\')">金鑰欄位</button>'
+      +   '<button onclick="openPublicForm(\''+a.id+'\')">'+(a.public?'公開中':'公開')+'</button>'
       +   '<button onclick="openAppWho(\''+a.id+'\')">誰可以用</button>'
       +   '<button class="danger" onclick="askDeleteApp(\''+a.id+'\')">刪除</button>'
       + '</div></div>';
@@ -688,6 +691,29 @@ function saveFields(btn){
       toast(!fields.length ? "改回一格了" : (d.migrated ? "設好了，原本那串已經拆進各格" : "設好了，接著按「換金鑰」把各格填一填"),"ok"); })
     .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="存起來"; } });
 }
+/* ---------- 公開模式（打開網址就能用，沒有登入畫面） ---------- */
+function openPublicForm(id){
+  var a=appById(id);
+  var on=!!a.public;
+  openDialog('<div class="sheet-head"><h3>「'+esc(a.name)+'」要公開嗎？</h3><button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + '<div class="warnbox">'+esc(KF.PUBLIC_WARNING).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>")+'</div>'
+    + '<p class="sub">公開之後：任何人打開那個 App 的網址就能用，<b>不需要選人、不需要密碼</b>，'
+    +   '也不會再跳解鎖畫面。<br>適合：TMDB／OMDb 這種免費查詢金鑰。<br>'
+    +   '不適合：GitHub token、密碼、任何有寫入權的東西（後台也會直接擋下來）。</p>'
+    + (a.publicBlocked ? '<div class="warnbox">目前這個 App 勾了公開<b>但被擋下來</b>：'+esc(a.publicBlockReason||"")+'</div>' : '')
+    + (on
+        ? '<button class="btn-danger" onclick="savePublic(\''+id+'\', false, this)" style="margin-bottom:10px">關掉公開，改回要密碼</button>'
+        : '<button class="btn-primary" onclick="savePublic(\''+id+'\', true, this)">我知道會被看到，設成公開</button>')
+    + '<button class="btn-ghost" onclick="closeSheet()">算了</button>');
+}
+function savePublic(id, on, btn){
+  busy(btn, on?"設定中…":"關閉中…");
+  api("/apps/"+encodeURIComponent(id)+"/public","POST",{public:on})
+    .then(function(d){ applyState(d); closeSheet();
+      toast(on?"設成公開了，那個 App 打開網址就能用":"已經改回加密（要選人＋密碼）","ok"); })
+    .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent=on?"我知道會被看到，設成公開":"關掉公開，改回要密碼"; } });
+}
+
 function openAppWho(id){
   var a=appById(id);
   formState={id:id, userIds:S.users.filter(function(u){return u.apps.indexOf(id)>=0;}).map(function(u){return u.id;})};

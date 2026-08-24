@@ -569,6 +569,246 @@ async function groupG() {
 }
 
 /* ------------------------------------------------------------------ */
+/* J. 解鎖模組對「公開 App」的行為（不用瀏覽器，用假的 document／fetch）   */
+/* ------------------------------------------------------------------ */
+function loadUnlock(ringJson, store) {
+  const g = globalThis;
+  const saved = { window: g.window, document: g.document, fetch: g.fetch,
+    localStorage: g.localStorage, sessionStorage: g.sessionStorage };
+  const mk = (init) => {
+    const m = Object.assign({}, init || {});
+    return { getItem: (k) => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); },
+      removeItem: (k) => { delete m[k]; }, _m: m };
+  };
+  const ls = mk(store), ss = mk();
+  const style = { id: "", textContent: "" };
+  const el = () => ({ id: "", className: "", innerHTML: "", style: {}, hidden: false,
+    appendChild: () => { }, addEventListener: () => { }, remove: () => { },
+    querySelector: () => null, querySelectorAll: () => [], setAttribute: () => { }, focus: () => { } });
+  g.document = { getElementById: () => null, getElementsByTagName: () => [el()], createElement: () => style,
+    addEventListener: () => { }, body: el(), head: el(), querySelector: () => null, querySelectorAll: () => [] };
+  g.window = g;
+  g.localStorage = ls; g.sessionStorage = ss;
+  let fetched = 0;
+  g.fetch = () => {
+    fetched++;
+    if (ringJson === null) return Promise.reject(new Error("offline"));
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(ringJson) });
+  };
+  delete require.cache[require.resolve(path.join(ROOT, "client", "keyring-unlock.js"))];
+  const K = require(path.join(ROOT, "client", "keyring-unlock.js"));
+  const restore = () => {
+    for (const k of Object.keys(saved)) {
+      if (saved[k] === undefined) delete g[k]; else g[k] = saved[k];
+    }
+  };
+  return { K, ls, ss, restore, calls: () => fetched };
+}
+async function groupJ() {
+  head("J  解鎖模組：公開的 App 完全不走解鎖流程（新 API：isPublic／whenReady）");
+  const PLAIN = JSON.stringify({ tmdb: "0f7c2a91b4e35d68af10cc4471e9b2d3", omdb: "9ab12cd3" });
+  const RING = {
+    version: 1,
+    apps: [{ id: "travel-book", name: "旅途手帳", emoji: "🧳" },
+           { id: "movie-library", name: "電影評分", emoji: "🎬", public: true, plain: PLAIN }],
+    users: [{ id: "u1", name: "黏", emoji: "🧔", theme: "ocean",
+      kdf: { algo: "PBKDF2-SHA256", iter: 600000, salt: "c2FsdA==" },
+      apps: { "travel-book": { iv: "aXY=", cipher: "Yw==" } } }]
+  };
+
+  /* 1) 公開的 App */
+  let u = loadUnlock(RING);
+  try {
+    const st0 = u.K.init({ appId: "movie-library", tokenKey: "app_key", url: "https://x/keyring.json" });
+    check("J1. init() 當下還不知道（值要等抓回來）", st0.ready === false);
+    const st = await u.K.whenReady();
+    check("J2. ★ whenReady() 之後 isPublic() 是 true", u.K.isPublic() === true && st.public === true);
+    check("J3. ★ 值直接寫進宿主的 tokenKey（沒有解鎖、沒有密碼、沒有選人）",
+      u.ls.getItem("app_key") === PLAIN, JSON.stringify(u.ls.getItem("app_key")));
+    check("J4. ★ chipHtml() 回空字串（公開模式沒有身分可言）", u.K.chipHtml() === "");
+    u.K.open("");
+    u.K.maybeIntro();
+    check("J5. ★ open()／maybeIntro() 都不彈任何東西（沒有解鎖畫面）",
+      u.ls.getItem("keyring.movie-library.introSeen") === null);
+    check("J6. isUnlocked() 是 true（宿主拿這個判斷「能不能用」）", u.K.isUnlocked() === true);
+    check("J7. 值有存一份快取（下次沒網路也打得開）",
+      u.ls.getItem("keyring.movie-library.pub") === PLAIN);
+  } finally { u.restore(); }
+
+  /* 2) 同一台裝置、這次抓不到鑰匙圈（離線） */
+  u = loadUnlock(null, { "keyring.movie-library.pub": PLAIN });
+  try {
+    u.K.init({ appId: "movie-library", tokenKey: "app_key", url: "https://x/keyring.json" });
+    check("J8. ★ 離線：用上次的快取值，App 照樣打得開（不是踢回去）",
+      u.ls.getItem("app_key") === PLAIN && u.K.isPublic() === true);
+    await u.K.whenReady();
+    check("J9. 抓不到鑰匙圈時 whenReady() 一樣會回來（不會卡住宿主）", true);
+  } finally { u.restore(); }
+
+  /* 3) 非公開的 App：行為一個字都沒變 */
+  u = loadUnlock(RING);
+  try {
+    u.K.init({ appId: "travel-book", tokenKey: "tb_key", url: "https://x/keyring.json" });
+    await u.K.whenReady();
+    check("J10. ★ 沒標公開的 App：isPublic() 是 false、沒有值被寫進去",
+      u.K.isPublic() === false && u.ls.getItem("tb_key") === null);
+    check("J11. 沒標公開的 App 還是畫得出身分藥丸（原本的行為）",
+      /kr-chip/.test(u.K.chipHtml()));
+  } finally { u.restore(); }
+
+  /* 4) 後台把公開關掉 → 快取清掉、回到要解鎖 */
+  const RING_OFF = JSON.parse(JSON.stringify(RING));
+  RING_OFF.apps[1] = { id: "movie-library", name: "電影評分", emoji: "🎬" };
+  u = loadUnlock(RING_OFF, { "keyring.movie-library.pub": PLAIN, app_key: PLAIN });
+  try {
+    u.K.init({ appId: "movie-library", tokenKey: "app_key", url: "https://x/keyring.json" });
+    await u.K.whenReady();
+    check("J12. ★ 後台關掉公開之後：快取與金鑰都清掉，回到要解鎖那條路",
+      u.K.isPublic() === false && u.ls.getItem("app_key") === null &&
+      u.ls.getItem("keyring.movie-library.pub") === null,
+      "isPublic=" + u.K.isPublic() + " token=" + u.ls.getItem("app_key"));
+  } finally { u.restore(); }
+
+  /* 5) 公開值變了（後台換了金鑰）→ 自動換過去 */
+  const RING2 = JSON.parse(JSON.stringify(RING));
+  RING2.apps[1].plain = JSON.stringify({ tmdb: "NEWKEY99887766554433221100aabbcc", omdb: "" });
+  u = loadUnlock(RING2, { "keyring.movie-library.pub": PLAIN, app_key: PLAIN });
+  try {
+    let changed = 0;
+    u.K.init({ appId: "movie-library", tokenKey: "app_key", url: "https://x/keyring.json",
+      onChange: function () { changed++; } });
+    await u.K.whenReady();
+    check("J13. 後台換了公開值 → 自動換過去並通知宿主",
+      u.ls.getItem("app_key") === RING2.apps[1].plain && changed >= 1,
+      "changed=" + changed + " token=" + u.ls.getItem("app_key"));
+  } finally { u.restore(); }
+}
+
+/* ------------------------------------------------------------------ */
+/* H. 公開模式（打開網址就能用，沒有登入畫面）                            */
+/* ------------------------------------------------------------------ */
+async function groupH() {
+  head("H  公開模式：值以明文放進 keyring.json，不綁使用者、不需要密碼");
+  const secrets = fakeSecrets(false);
+  const dir = makeSandbox("public", false);
+  fs.writeFileSync(path.join(dir, "secrets.json"), JSON.stringify(secrets, null, 2));
+  const port = 45236;
+  const s = startServer(dir, port);
+  const ring = () => JSON.parse(fs.readFileSync(path.join(dir, "keyring.json"), "utf8"));
+  const appIn = (r, id) => (r.apps || []).find((a) => a.id === id);
+  try {
+    if (!(await waitUp(port))) { check("H0. server 起得來", false, s.logs.join("").slice(0, 300)); return; }
+    const F = KF.presetFor("movie-library").fields;
+    const TMDB = "0f7c2a91b4e35d68af10cc4471e9b2d3", OMDB = "9ab12cd3";
+
+    /* 1) 登記一個分兩格的 App、填值 —— 預設一律加密 */
+    let r = await req(port, "POST", "/apps", { name: "電影評分", appId: "movie-library", emoji: "🎬", fields: F });
+    await req(port, "POST", "/apps/movie-library/token", { values: { tmdb: TMDB, omdb: OMDB } });
+    check("H1. ★ 預設是加密的（沒有 public、沒有 plain，跟以前一模一樣）",
+      !appIn(ring(), "movie-library").public && !appIn(ring(), "movie-library").plain &&
+      !!ring().users[0].apps["movie-library"].cipher,
+      JSON.stringify(appIn(ring(), "movie-library")));
+
+    /* 2) 勾公開：後台自己把現有的值搬過去，老闆不用重新輸入 */
+    r = await req(port, "POST", "/apps/movie-library/public", { public: true });
+    const pubApp = appIn(ring(), "movie-library");
+    check("H2. ★ 勾公開之後，值以明文出現在 apps[]（欄位叫 plain，跟 iv／cipher 分得開）",
+      pubApp.public === true && pubApp.plain === JSON.stringify({ tmdb: TMDB, omdb: OMDB }),
+      JSON.stringify(pubApp));
+    check("H3. ★ 老闆不用重新輸入金鑰（值是後台自己從 secrets 搬過去的）",
+      JSON.parse(pubApp.plain).tmdb === TMDB && JSON.parse(pubApp.plain).omdb === OMDB);
+    check("H4. ★ 公開的 App 不再綁在任何使用者底下（不需要選人、不需要密碼）",
+      ring().users.every((u) => !u.apps["movie-library"]),
+      JSON.stringify(ring().users.map((u) => Object.keys(u.apps))));
+    check("H5. 其他 App 的密文一個都沒少（旅途手帳、食譜本不受影響）",
+      ring().users.every((u) => !!u.apps["travel-book"] && !!u.apps["recipe-book"]) &&
+      !appIn(ring(), "travel-book").plain && !appIn(ring(), "travel-book").public,
+      JSON.stringify(appIn(ring(), "travel-book")));
+
+    /* 3) 關掉公開 → 密文回來、明文消失 */
+    r = await req(port, "POST", "/apps/movie-library/public", { public: false });
+    check("H6. 關掉公開：明文消失、每個人的密文回來（可逆）",
+      !appIn(ring(), "movie-library").plain && !appIn(ring(), "movie-library").public &&
+      ring().users.every((u) => !!u.apps["movie-library"]),
+      JSON.stringify(appIn(ring(), "movie-library")));
+    await req(port, "POST", "/apps/movie-library/public", { public: true });
+
+    /* 4) ⛔ GitHub token 不准公開 —— 三道都要擋 */
+    await req(port, "POST", "/apps", { name: "危險", appId: "danger-app", token: "ghp_FAKEBUTLOOKSREAL0123456789abcdef" });
+    r = await req(port, "POST", "/apps/danger-app/public", { public: true });
+    check("H7. ★ 值長得像 GitHub token → server 直接擋（不是只靠前端警告）",
+      r.status === 400 && /GitHub token/.test(r.body.message), r.body && r.body.message);
+    check("H8. 被擋下來的那個 App 還是加密的（沒有半套狀態）",
+      !appIn(ring(), "danger-app").public && !appIn(ring(), "danger-app").plain);
+
+    /* 5) 已經公開之後才貼 PAT 進來 → 換金鑰那支也要擋 */
+    r = await req(port, "POST", "/apps/movie-library/token", { values: { tmdb: "github_pat_11FAKE0000abcdefghijklmnop" } });
+    check("H9. ★ 已經公開的 App 換金鑰時貼 PAT → 也擋（他可能是公開之後才換的）",
+      r.status === 400 && /GitHub token/.test(r.body.message), r.body && r.body.message);
+
+    /* 6) 最後一道：值被繞過前面兩道改掉時，產生 keyring.json 的那一刻降級成加密 */
+    const sec = JSON.parse(fs.readFileSync(path.join(dir, "secrets.json"), "utf8"));
+    sec.apps.find((a) => a.id === "movie-library").token =
+      JSON.stringify({ tmdb: "ghp_SNEAKED0123456789abcdefghijkl", omdb: "" });
+    fs.writeFileSync(path.join(dir, "secrets.json"), JSON.stringify(sec, null, 2));
+    s.ps.kill();
+    await sleep(300);
+    const s2 = startServer(dir, port + 20);
+    try {
+      if (!(await waitUp(port + 20))) { check("H10. 重開 server", false, ""); return; }
+      await req(port + 20, "POST", "/apps/travel-book/users", { userIds: ["u-fake"] });   /* 觸發一次重產 */
+      const app2 = appIn(ring(), "movie-library");
+      check("H10. ★ 最後一道：產生 keyring.json 的那一刻發現值變成 PAT → 降級成加密，明文不出去",
+        !app2.plain && !app2.public && !!ring().users[0].apps["movie-library"],
+        JSON.stringify(app2));
+      const st = await req(port + 20, "GET", "/state");
+      const v = st.body.state.apps.find((a) => a.id === "movie-library");
+      check("H11. 後台看得到「勾了公開但被擋下來」，不是靜靜失效",
+        v.public === true && v.publicBlocked === true && /GitHub token/.test(v.publicBlockReason),
+        JSON.stringify({ public: v.public, blocked: v.publicBlocked }));
+      /* 7) 紅線：整份 keyring.json 不准出現 GitHub token 形狀的明文 */
+      const ringText = fs.readFileSync(path.join(dir, "keyring.json"), "utf8");
+      check("H12. ★ 紅線：keyring.json 裡沒有任何 GitHub token 形狀的明文",
+        !KF.looksLikeGithubToken(ringText), (/(gh[porsu]_[A-Za-z0-9]{6,}|github_pat_[A-Za-z0-9_]{6,})/.exec(ringText) || [])[0] || "");
+    } finally { try { s2.ps.kill(); } catch (e) { } }
+  } finally {
+    try { s.ps.kill(); } catch (e) { }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* I. ★ 突變：把公開模式的防線拿掉，H 的紅線必須抓到                      */
+/* ------------------------------------------------------------------ */
+async function groupI() {
+  head("I  ★ 突變測試：把「PAT 不准公開」的防線拿掉，紅線必須抓到");
+  const secrets = fakeSecrets(false);
+  const dir = makeSandbox("pubproof", false);
+  fs.writeFileSync(path.join(dir, "secrets.json"), JSON.stringify(secrets, null, 2));
+  /* 三道防線一起拿掉（少拿一道就會在更早的地方被擋住，得到「紅線壞掉」的假結論） */
+  const kp = path.join(dir, "client", "keyring-fields.js");
+  let ksrc = fs.readFileSync(kp, "utf8");
+  const hit = ksrc.includes("function publicBlockReason(app) {");
+  ksrc = ksrc.replace("function publicBlockReason(app) {", "function publicBlockReason(app) { if (1) return \"\";");
+  fs.writeFileSync(kp, ksrc);
+  check("I0. 突變真的套用了（不然這一組等於沒測）", hit);
+  const port = 45238;
+  const s = startServer(dir, port);
+  try {
+    if (!(await waitUp(port))) { check("I1. server 起得來", false, s.logs.join("").slice(0, 300)); return; }
+    await req(port, "POST", "/apps", { name: "危險", appId: "danger-app", token: "ghp_SNEAKED0123456789abcdefghijkl" });
+    const r = await req(port, "POST", "/apps/danger-app/public", { public: true });
+    const ringText = fs.readFileSync(path.join(dir, "keyring.json"), "utf8");
+    check("I1. ★ 拿掉防線之後，PAT 真的會被寫進公開檔（證明 H7～H12 是承重的）",
+      r.status === 200 && KF.looksLikeGithubToken(ringText),
+      "API=" + r.status + " 檔案裡有 PAT=" + KF.looksLikeGithubToken(ringText));
+  } finally {
+    try { s.ps.kill(); } catch (e) { }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* D. keyring-unlock.js 的 CSS（滿版層按鈕的宿主滲漏防護）               */
 /* ------------------------------------------------------------------ */
 function groupD() {
@@ -797,6 +1037,9 @@ function groupE() {
   if (wants("D")) groupD();
   if (wants("E")) groupE();
   if (wants("F")) await groupF();
+  if (wants("H")) await groupH();
+  if (wants("J")) await groupJ();
+  if (wants("I")) await groupI();
   if (wants("G")) await groupG();
   const bad = results.filter((r) => !r.ok);
   console.log("\n" + "=".repeat(64));

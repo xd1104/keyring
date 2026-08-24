@@ -192,6 +192,44 @@ Pages 是純靜態、**沒有伺服器可以驗密碼**。所以：
 - 欄位代號只收英文小寫（`tmdb`、`omdb`），跟 App id 同一條鐵律。
 - 那個 App 的前端自己負責把那串 JSON 拆成兩把（好雷嗎已經這樣做了）。
 
+## 公開模式：打開網址就能用，沒有登入畫面
+
+有些 App 用的根本不是憑證，是**免費查詢金鑰**（電影評分的 TMDB／OMDb）。
+那種 App 不該有登入畫面，所以可以把它標成 **公開**：值**不加密**，直接以明文放進公開的
+`keyring.json`，**不綁任何使用者、不需要密碼**。
+
+```jsonc
+// keyring.json 的 apps[]（公開的那一筆才有 public / plain）
+{ "id": "movie-library", "name": "電影評分", "emoji": "🎬",
+  "public": true,
+  "plain": "{\"tmdb\":\"0f7c…\",\"omdb\":\"9ab1…\"}" }
+```
+
+- 欄位刻意叫 **`plain`**（跟 `iv`／`cipher` 明確分開），讀取端一眼分得出來這不是密文。
+- 公開的 App **不會**再出現在 `users[].apps` 裡（同一個值有兩個來源只會讓讀取端要猜哪個算數）。
+- 前端不用改：`Keyring.init()` 發現這個 App 是公開的就直接把值交給宿主，
+  **不彈解鎖層、不畫身分藥丸**。宿主可以問 `Keyring.isPublic()` 與 `Keyring.whenReady()`。
+- 值會在裝置上快取一份，**下次沒網路也打得開**；後台換了值就自動換過去。
+
+### 怎麼設（後台按一下就好）
+
+那一列的 **「公開」** → 「我知道會被看到，設成公開」。
+**不用重新輸入金鑰**：後台自己把現有的值搬進公開區塊。手機後台是 ⋯ →「🌐 公開模式」。
+
+### ⛔ 代價與防線
+
+**公開＝任何人都拿得到那組金鑰。** TMDB／OMDb 最壞是額度被用掉，重新產一組就好；
+**GitHub token 絕對不行**（有 repo 寫入權，外流是災難）。所以：
+
+1. **預設一律加密**，公開必須明確按下去
+2. 按下去之前有白話警告（`KF.PUBLIC_WARNING`）
+3. **值長得像 GitHub token（`github_pat_` / `ghp_` / `gho_` / `ghu_` / `ghs_` / `ghr_`）就在 server 端擋**，
+   不是只靠前端；換金鑰時也擋（他可能是公開之後才貼 PAT 進來的）
+4. **產生 `keyring.json` 的那一刻再擋一次**：發現值變成 PAT 就**降級成加密**（fail-safe，
+   祕密留在密文裡），後台畫面上會顯示「勾了公開但被擋下來」，不是靜靜失效
+5. 紅線：`tools/check-fields.js` 的 **H12** 斷言 `keyring.json` 裡沒有任何 GitHub token 形狀的明文，
+   **I 組**故意把防線拿掉證明那條紅線會紅
+
 ## 別的 App 要導入（三步）
 
 1. 把 `client/keyring-unlock.js` 複製到那個 App 的前端資料夾（自帶樣式、零依賴、單一檔）。
@@ -257,8 +295,9 @@ fine-grained PAT，Repository access 只勾 matrix 裡那幾個 repo，權限只
 node tools/check-unlock.js            # 全部 38 條（要 Chrome ＋ 旁邊的 travel-planner／recipe-book）
 node tools/check-unlock.js --only=A,B # 只跑某幾組
 
-node tools/check-fields.js            # 多欄位金鑰 68 條（純 node，零依賴，哪台機器都跑得動）
-node tools/check-fields.js --only=B   # A 邏輯／B 向後相容／C 後台 API／D 模組 CSS／E 後台畫面／F 紅線：回應不含明文
+node tools/check-fields.js            # 多欄位＋公開模式 109 條（純 node，零依賴）
+node tools/check-fields.js --only=B   # A 邏輯／B 向後相容／C 後台 API／D 模組 CSS／E 後台畫面
+                                      # F,G 紅線：回應不含明文／H,I 公開模式／J 模組的公開行為
 ```
 
 `check-fields.js`（A 邏輯／B 向後相容／C 後台 API／D 模組 CSS／E 兩個後台的畫面／F 紅線）全程用假金鑰、只在 `os.tmpdir()` 底下讀寫，**不會碰到

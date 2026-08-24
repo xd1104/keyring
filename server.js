@@ -215,7 +215,7 @@ function buildVaultPayload() {
     updatedAt: S.updatedAt,
     apps: S.apps.map((a) => ({
       id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
-      fields: KF.normFields(a.fields),
+      fields: KF.normFields(a.fields), public: !!a.public,
     })),
     users: S.users.map((u) => ({
       id: u.id, name: u.name, emoji: u.emoji, theme: u.theme,
@@ -254,9 +254,10 @@ function adoptPayload(p) {
     updatedAt: p.updatedAt || new Date().toISOString(),
     apps: (p.apps || []).map((a) => ({
       id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
-      /* ⚠️ 他手機上還快取著的**舊版後台**不認得 fields，送上來的資料根本沒有這個鍵。
-       *    那是「這版不認得」不是「他要清空」→ 保留這台電腦原本的宣告（規則在 KF.adoptFields）。 */
+      /* ⚠️ 他手機上還快取著的**舊版後台**不認得 fields／public，送上來的資料根本沒有那些鍵。
+       *    那是「這版不認得」不是「他要清空／關掉」→ 保留這台電腦原本的設定。 */
       fields: KF.adoptFields(a, S.apps.find((x) => x.id === a.id)),
+      public: KF.adoptPublic(a, S.apps.find((x) => x.id === a.id)),
     })),
     users: (p.users || []).map((u) => ({
       id: u.id, name: u.name, emoji: u.emoji, theme: u.theme,
@@ -292,7 +293,7 @@ function loadSecrets() {
     };
     S.users.forEach((u) => { if (!Array.isArray(u.apps)) u.apps = []; });
     /* 舊的 secrets.json 沒有 fields → 一律正規化成 []（＝單欄位，行為完全不變） */
-    S.apps.forEach((a) => { a.fields = KF.normFields(a.fields); });
+    S.apps.forEach((a) => { a.fields = KF.normFields(a.fields); a.public = !!a.public; });
   } catch (e) {
     if (e.code !== 'ENOENT') console.error('[secrets] 讀取失敗，改用空的鑰匙圈：', e.message);
     S = { version: 1, updatedAt: null, apps: [], users: [], github: { token: '' } };
@@ -308,16 +309,37 @@ async function saveSecrets(keepStamp) {
  * ⚠️ 多欄位金鑰**刻意不改這裡**：欄位宣告是後台自己的事（存在 secrets.json／vault.json），
  *    公開檔的結構維持原樣，client/keyring-unlock.js 與三個 App 都不用動。
  *    加密的還是「一個 App 一串字」，只是那串字現在由後台幫他組好。 */
+/* 公開模式：產生 keyring.json 的**那一刻**再擋一次。
+ * 為什麼不是只在 API 擋：值可能是「標成公開之後」才被換掉的
+ * （他先把 App 設公開，過幾天換金鑰時貼了一把 PAT 進去）。
+ * 擋到的話**降級成加密**（fail-safe：祕密留在密文裡），不是整個發布掛掉——
+ * 掛掉會讓他連「把公開關掉」都做不到。降級的原因會出現在後台畫面上（viewState 的 publicBlocked）。 */
+function publicPlain(app) {
+  if (!app || !app.public || !app.token) return null;
+  return KF.publicBlockReason(app) ? null : app.token;
+}
+
 function buildKeyring() {
   return {
     version: 1,
     updatedAt: new Date().toISOString(),
-    apps: S.apps.map((a) => ({ id: a.id, name: a.name, emoji: a.emoji })),
+    apps: S.apps.map((a) => {
+      const out = { id: a.id, name: a.name, emoji: a.emoji };
+      /* ⭐ 公開的 App：值直接以**明文**放在 apps[] 這一層。
+       * 欄位名字刻意叫 plain（跟 iv／cipher 明確分開），讀取端一眼就知道這不是密文。
+       * 不綁任何使用者、不需要密碼 —— 那正是「打開網址就能用」的意思。 */
+      const plain = publicPlain(a);
+      if (a.public && plain !== null) { out.public = true; out.plain = plain; }
+      return out;
+    }),
     users: S.users.map((u) => {
       const apps = {};
       (u.apps || []).forEach((appId) => {
         const app = S.apps.find((a) => a.id === appId);
         if (!app || !app.token || !u.dk) return;
+        /* 公開的 App 不再產生每個人的密文：同一個值有兩個來源只會讓讀取端要猜哪個才算數。
+         * （被擋下來而降級的那種還是走密文，所以這裡用 publicPlain 判斷，不是用 a.public） */
+        if (publicPlain(app) !== null) return;
         const key = Buffer.from(u.dk, 'base64');
         const e = encryptWithKey(key, app.token);
         apps[appId] = { iv: e.iv, cipher: e.cipher };
@@ -604,6 +626,10 @@ function viewState() {
         fieldsMasked: fields.length ? KF.maskedFields(fields, a.token) : [],
         /* 多欄位的 App 才會有：那串字目前拆不拆得開（拆不開時後台要提醒他確認） */
         fieldsOk: fields.length ? KF.parse(fields, a.token).ok : true,
+        /* 公開模式：是不是公開、以及「勾了公開但被擋下來」的原因（值長得像 GitHub token） */
+        public: !!a.public,
+        publicBlocked: !!a.public && !!KF.publicBlockReason(a),
+        publicBlockReason: a.public ? KF.publicBlockReason(a) : '',
         users: S.users.filter((u) => (u.apps || []).indexOf(a.id) >= 0).map((u) => u.id),
       };
     }),
@@ -774,12 +800,21 @@ async function handleApi(req, res, url) {
       const badNew = badHint(wantFields);
       if (badNew) return sendJson(res, 400, { ok: false, message: badNew });
     }
+    /* 公開旗標：沒帶就不動（預設一律加密；新 App 沒帶就是 false） */
+    const wantPublic = b.public === undefined ? null : !!b.public;
     let a = b.id ? findApp(b.id) : null;
     if (a) {
       a.name = name; a.emoji = b.emoji || a.emoji; a.url = String(b.url || a.url || '');
       if (wantFields) a.fields = wantFields;
       const tk = composeToken(a, b);
       if (tk !== null) a.token = tk;
+      if (wantPublic !== null) {
+        if (wantPublic) {
+          const why = KF.publicBlockReason(a);
+          if (why) return sendJson(res, 400, { ok: false, message: why });
+        }
+        a.public = wantPublic;
+      }
     } else {
       /* ⛔ 這裡**刻意不沿用**別的 App 的金鑰（2026-08-24 Benson 拍板改回來）。
        * 舊版為了省事，沒貼金鑰時會自動抄「最後一個有金鑰的 App」的那把。
@@ -798,7 +833,14 @@ async function handleApi(req, res, url) {
           message: '已經有一個代號叫「' + wanted + '」的 App 了。要改它的名字或金鑰請在那一列按「換金鑰」，不要重新登記一次。' });
       }
       const id = uniqueId(wanted || newId('app'), S.apps.map((x) => x.id));
-      a = { id, name, emoji: b.emoji || '📦', url: String(b.url || ''), token, fields: wantFields || [] };
+      a = { id, name, emoji: b.emoji || '📦', url: String(b.url || ''), token,
+        fields: wantFields || [], public: false };
+      /* 新 App 也可以直接標公開，但一樣要過那道防線（預設是 false，必須明確送 true） */
+      if (wantPublic) {
+        const why = KF.publicBlockReason(a);
+        if (why) return sendJson(res, 400, { ok: false, message: why });
+        a.public = true;
+      }
       /* 多欄位的 App：金鑰是由各格組出來的，不是直接貼一串。所以「有沒有金鑰」
        * 要等組完才算得準——不能在上面就用 b.token 是不是空的來擋。 */
       const tk0 = composeToken(a, b);
@@ -831,10 +873,20 @@ async function handleApi(req, res, url) {
       const next = KF.merge(fields, cur.values, b.values || {}, b.clear || []);
       const v = KF.validate(fields, next);
       if (!v.ok) return sendJson(res, 400, { ok: false, message: v.message });
-      a.token = KF.compose(fields, next, cur.extra);
+      const nextToken = KF.compose(fields, next, cur.extra);
+      /* 公開的 App 換金鑰時再擋一次：他可能是在公開之後才貼了一把 PAT 進來 */
+      if (a.public) {
+        const why = KF.publicBlockReason({ token: nextToken, fields });
+        if (why) return sendJson(res, 400, { ok: false, message: why + '（這個 App 目前是公開的，要放這種金鑰請先把公開關掉）' });
+      }
+      a.token = nextToken;
     } else {
       const token = String(b.token || '').trim();
       if (!token) return sendJson(res, 400, { ok: false, message: '先貼上新的金鑰' });
+      if (a.public) {
+        const why = KF.publicBlockReason({ token, fields });
+        if (why) return sendJson(res, 400, { ok: false, message: why + '（這個 App 目前是公開的，要放這種金鑰請先把公開關掉）' });
+      }
       a.token = token;
     }
     await commitChanges();
@@ -848,6 +900,24 @@ async function handleApi(req, res, url) {
    *    整串當成第一格顯示），等他自己送新值進來再改。
    *    絕對不要在這裡把拆不開的東西改寫成 JSON —— 那等於在他還沒確認之前就動了他的資料，
    *    而且他按「改回一格」也救不回原本那串。 */
+  /* 公開模式開關。⛔ 預設一律加密，公開必須明確送 public:true 進來。 */
+  mt = p.match(/^\/apps\/([^/]+)\/public$/);
+  if (mt && m === 'POST') {
+    const a = findApp(decodeURIComponent(mt[1]));
+    if (!a) return sendJson(res, 404, { ok: false, message: '找不到這個 App' });
+    const b = await readJson(req);
+    const want = !!b.public;
+    if (want) {
+      /* 硬防線：不是只靠前端的警告框。值長得像 GitHub token 就直接擋，
+       * 因為公開＝明文放進公開 repo，那種東西外流是災難（有 repo 寫入權）。 */
+      const why = KF.publicBlockReason(a);
+      if (why) return sendJson(res, 400, { ok: false, message: why });
+    }
+    a.public = want;
+    await commitChanges();
+    return sendJson(res, 200, { ok: true, state: viewState() });
+  }
+
   mt = p.match(/^\/apps\/([^/]+)\/fields$/);
   if (mt && m === 'POST') {
     const a = findApp(decodeURIComponent(mt[1]));

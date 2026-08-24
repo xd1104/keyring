@@ -253,6 +253,69 @@
     return has ? normFields(incoming.fields) : normFields(prev && prev.fields);
   }
 
+  /* ==================================================================
+   * 公開模式（2026-08-24）
+   * ------------------------------------------------------------------
+   * 有些 App 用的根本不是憑證，是**免費查詢金鑰**（電影評分的 TMDB／OMDb）。
+   * 那種 App 不該有登入畫面：打開網址就要能用。
+   * 做法：標成「公開」的 App，值**不加密**、直接以明文寫進公開的 keyring.json，
+   *      不綁任何使用者、不需要密碼。
+   *
+   * ⚠️ 代價 Benson 已經知道並接受：**任何人拿得到那組金鑰**。
+   *    最壞是額度被別人用掉，重新產一組就好。
+   * ⛔ 但 GitHub PAT 絕對不行——那兩把有 repo 寫入權，外流是災難。
+   *    所以下面這道 looksLikeGithubToken 是**硬防線**，前端擋一次、server 擋一次、
+   *    連產生 keyring.json 的那一刻還要再擋一次（值可能是「標成公開之後」才被換掉的）。
+   * ================================================================== */
+
+  /* GitHub token 的長相。github_pat_（fine-grained）與 gh[porsu]_（classic／OAuth／server／refresh） */
+  var GH_TOKEN_RE = /(github_pat_[A-Za-z0-9_]{10,}|\bgh[porsu]_[A-Za-z0-9]{20,})/i;
+
+  /** 這串字裡面有沒有長得像 GitHub token 的東西 */
+  function looksLikeGithubToken(v) { return GH_TOKEN_RE.test(str(v)); }
+
+  /**
+   * 這個 App 可不可以標成公開？不行的話回一句人話，可以就回 ""。
+   * 逐格檢查（多欄位）＋整串檢查（單欄位／拆不開的舊資料）。
+   */
+  function publicBlockReason(app) {
+    var token = str(app && app.token);
+    if (!token.trim()) return "";               /* 還沒有值，等他填的時候再擋 */
+    var fs = normFields(app && app.fields), i;
+    if (fs.length) {
+      var r = parse(fs, token);
+      if (r.ok) {
+        for (i = 0; i < fs.length; i++) {
+          if (looksLikeGithubToken(r.values[fs[i].key])) {
+            return "「" + fs[i].label + "」看起來是 GitHub token。GitHub token 有 repo 寫入權，"
+              + "**絕對不可以**公開。公開模式只能放像 TMDB／OMDb 那種免費查詢金鑰。";
+          }
+        }
+        return "";
+      }
+    }
+    if (looksLikeGithubToken(token)) {
+      return "這個 App 的金鑰看起來是 GitHub token。GitHub token 有 repo 寫入權，"
+        + "**絕對不可以**公開。公開模式只能放像 TMDB／OMDb 那種免費查詢金鑰。";
+    }
+    return "";
+  }
+
+  /** 勾公開之前要讓他看到的警告（兩個後台共用同一段話） */
+  var PUBLIC_WARNING = "這個 App 的金鑰會以**明文**放在公開的 GitHub repo，任何人都看得到。"
+    + "只有像 TMDB 這種免費查詢金鑰可以這樣放；GitHub token、密碼、任何有寫入權的東西絕對不行。";
+
+  /**
+   * 接手別台改過的資料時，「公開」這個旗標要用哪一份。
+   * 跟 adoptFields 同一條規則：舊版後台送上來的資料**沒有這個鍵**＝「這版不認得」，
+   * 不是「他要關掉公開」→ 保留原本的設定。
+   */
+  function adoptPublic(incoming, prev) {
+    var has = incoming && typeof incoming === "object" &&
+      Object.prototype.hasOwnProperty.call(incoming, "public");
+    return has ? !!incoming.public : !!(prev && prev.public);
+  }
+
   /* 現成的欄位組合：Benson 只要按一下，不用自己想代號要打什麼 */
   var PRESETS = [
     {
@@ -275,6 +338,8 @@
     looksSecret: looksSecret, safeHint: safeHint, safeLabel: safeLabel, badFieldText: badFieldText,
     compose: compose, parse: parse, validate: validate, maskSummary: maskSummary,
     maskField: maskField, maskedFields: maskedFields, merge: merge, adoptFields: adoptFields,
+    looksLikeGithubToken: looksLikeGithubToken, publicBlockReason: publicBlockReason,
+    adoptPublic: adoptPublic, PUBLIC_WARNING: PUBLIC_WARNING,
     PRESETS: PRESETS, presetFor: presetFor
   };
 });
