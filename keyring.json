@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-24T09:33:48.104Z",
+  "updatedAt": "2026-08-24T09:34:07.672Z",
   "apps": [
     {
       "id": "travel-book",
@@ -31,12 +31,16 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "a+sE0SbQ5Ub3yuMO",
-          "cipher": "q+VChTS7ImlnBP37mfSvYdVlpObxXRyMOT+QJ3Rp/fjU9Ocao56N49Ahx0eF31xco864nfX0GUDecyKONzCge37bnF7mV1Uk5SGlfkp6PoZybnZ88YJJ2KYlHF5zCE8bMJZi4GceHHqSMYNFMg=="
+          "iv": "fv0t6B4qWSMRwJBJ",
+          "cipher": "D0iMUazVYD8fkm7sHc00WTuxBwZkSwqY/VZC9lxKKaHCTuvzVTWk0J26f+DqLSzroEMcm++zMk1Dr08AFDHTHP1oYulH80xEi15ZeykayuZx8nbdzIi3xLo3YVa+SbAD6jtsMDptmJZtyFymtw=="
         },
         "recipe-book": {
-          "iv": "9XlYqFV5d+w3v5qY",
-          "cipher": "KLYGnbivwgXpvP0/Xu/yVMqWX68/gQLHpR0wl0FSanlti8vjak8b7bbqDzf2szXdmeaxw1LjRkdh7TAjuuRwyz3fiKpLEyacta+Ym2RzjfpzIAEzDbrk4mABWBelFvzCKFD80w7WI/bkRUMprQ=="
+          "iv": "zljSfurS3bmSrMGL",
+          "cipher": "lN8ANCwH+YDtNeMuHfuRp0Vvr0zrFJJOiVje7MfOCtHvRnzKjXh+ia6YL5d0uc4kiRsxbl//Dj8xPDb1t7phBC3mws46V+N0iLXZPCTVWR5kHP5IREmLeukcTQO64STDGAQ0UXkRMteGCsWUrg=="
+        },
+        "movie-library": {
+          "iv": "DM/zmO8LbwMLhYcZ",
+          "cipher": "+WlmQHi3VhTVjora+9exGZETJsBWXCAZFFMUngsUeHGRr/7PMvbHGvbMoYS5hTs8cicAVI0v0tj9dcQRqIcODIcpkFkalNXJrPPyHAg="
         }
       }
     },
@@ -52,12 +56,16 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "Q9uzMLmFLpeUCn6o",
-          "cipher": "Iz3MKJSxKnHQmwTFc8KmKCtsfmK5QrcYDaI5Ya3mUYrt7qRrIYqJyswdfy2cvImDNMbXnQ/PvUY7AzB5ysSYrxoXHhAD3V4/mrzMtnmFOwO6d9IEzykSVjV57xv+PDPBvy9jWmryu8B5uIxNhw=="
+          "iv": "NPui4MqtcZBYwuh0",
+          "cipher": "s424TXHdau5d1UhiIyIUVsBsoH3WjNhikEqw0aWdF0qaezwhpyWA7BwMI+dLtSrtIzHXtphtQIXqRFS1uv2DcH/9kK3l+XkfYx8zhAvwhj4Xl7pjpTbOzXWwGotetPLQPuVDLRQK9oNJt6m+Tg=="
         },
         "recipe-book": {
-          "iv": "xKUW3+rJJqfwAw8+",
-          "cipher": "8DM24ppfpWczB3QuYG79rbobngLHxLmCi2T8GKRxYNerqLfI+zepYPCSluadmkwyzoDnHEDJTXQzPAsaKeFtqXUjTMTuUj/mivpHw3wVd/89/Y4IX83k9gXR/0LTxTufGXzShyPDW8OZOkUUkA=="
+          "iv": "csUXV137FFqU1NZa",
+          "cipher": "l9+gvuSUnqsvbsPu64AvrMKJcrkGNG1zSAmI4ilzXf1TXt4ipsXcKWkvp5mb9FMab5dzLMUuOX6Z9tIyEOGzz5jQ3K3jFYg/hAjvbpiTx1lBUEPLuPveEUoKrCYltbpOTpE4MUdUgecQLVCWJg=="
+        },
+        "movie-library": {
+          "iv": "KVFSU2K6kYlYRDxc",
+          "cipher": "POdL6xW8LymKo7sEYslaGGZadbR8EYv+K8120QBAI9KhnJ6Z6K/4fK5rcSju+VcZY8xXUxaEIf1weaa0Q4dHHIZ8FO9BURFNMI0L23I="
         }
       }
     }
