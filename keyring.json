@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-24T08:51:47.700Z",
+  "updatedAt": "2026-08-24T08:52:20.534Z",
   "apps": [
     {
       "id": "travel-book",
@@ -31,12 +31,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "y+V+bnnc8G+KmFy0",
-          "cipher": "GmP6f56ylxcbqC1HKKcmWgqjLOsoGQNLA999S5NStspokVuN2SL/K8BrGm+ZIQOerEZwd8t3a+MeKD4Ytjfhk0Qo3wwk6nDzaCiZtfXzHm1F5mfsqh+Cp7s7B1I9j3mtc5+pG9dDpDT0E5Vj4w=="
+          "iv": "Rg9Ub9zjZWXC2H4J",
+          "cipher": "mxawQAq2vYYnF+vFVHFAyyJ/3hQTmf2lHs7y6ELlfsfoHm9NYtqsbu3/9tdAauqVxB0ampaDlynfIVAOrd0S+ymC1i7yAD1FdpjtvlEN0u1tWoT/FUrtA//1RI7K8jCKoqN88rwHAR1F6Kfl7Q=="
         },
         "recipe-book": {
-          "iv": "SKb8/ufFBAycUVr4",
-          "cipher": "oczn6Z8LxyUoXLQQXiT8I7N+AvVXQqzLXDGo5zfJ8yl0/dKmV0vE76aN5FfR4HYTKI34ZzeYXWwi9SfbBAr6s4LyKjlYB9ICD6NdRHMSDkKmejsgbbENdBb40AXTkuuupv/xpcgCsi2PipXqWg=="
+          "iv": "cX80ZfHo/KQC8E9d",
+          "cipher": "TY9Oq1hNJq10+TqIa7AF0Cg0FfJ2WqSSTOY3LN8XIk7/hf43wLnMCK5AE9X7T7vTtyKz74J1E+wIbBQiyUyhT+T0k54uFX7oY4s+fumlPguU2yzSN52s5FhWGibw1WhPnxB69SYTkptdcFyi2Q=="
         }
       }
     },
@@ -52,12 +52,12 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "3ePeOWgpTwDG0hGK",
-          "cipher": "3+FkEL/JAHKBLkrAnHn6SjU9CDSVnTQZi/kxRjz4WXW9aHpfGYBbc09D2qvHihdlkIb68/8gUigyOJCUt9NUAnugZSvY6GrypLNiVw0IUKXmAcpV6W5iN8VT8ZkMp8+1ka1MDyIZUAweDIy52g=="
+          "iv": "lSd07cCrxU2c3MWE",
+          "cipher": "TcPBklrS+TYFu99gzyeyFp2ZQ3op09y31Zp1pMtoPA4BP4Na+4TwvUMmFuGQ+YcXJNHdyElM6aWA93MtOVXJxGZqz2d9wXQk2OKuRum39L0O0Pi1eBaJlVWrc667AMCsjbjVQqxixwaXl0fEJg=="
         },
         "recipe-book": {
-          "iv": "SCAImbcudDegPSTv",
-          "cipher": "CuNwE13xSZJqRXLFeXNyFic4LmSyeKXZXaEjcuvl+5ZUOSjEkEepeXPtOUFX5DicvDISMfn+LCane9QzxhL8CaO8QoPbtAalb+QqlYjupDaN2kZST0d6i2+joeygYDxN+mJKSoDFeK36nxqfeQ=="
+          "iv": "SZBLHd6S8shvIAB9",
+          "cipher": "BmDltqv6iHg0+CZqSPWNnGbbXNMyJSD/GpgzgPP9zSfHGxZgsnq9epXEVawXVziRo5m7K/7pioJwkvjlrJUuIABPK7kptKTI+2Je6HW5m4ahKmEwVc4bQlQRAmyLcbAffakCAlHGbi1UMD1y1A=="
         }
       }
     }
