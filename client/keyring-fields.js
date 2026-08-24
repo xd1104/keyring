@@ -78,10 +78,10 @@
       var f = list[i] || {};
       var where = looksSecret(f.label) ? "標題" : (looksSecret(f.hint) ? "說明" : "");
       if (where) {
+        /* 這串是丟進 toast 的**純文字**，不要用 markdown 的星號（會原樣顯示出來）。 */
         return "「" + (looksSecret(f.label) ? (trim(f.key) || "其中一格") : (trim(f.label) || trim(f.key))) +
-          "」的**" + where + "**看起來像一把金鑰。這張表單只是宣告「這個 App 有哪幾格」，" +
-          "不是填金鑰的地方——金鑰要在那一列的「換金鑰」填。" +
-          "標題請寫人看的名字（例如「TMDB 金鑰」），說明可以寫格式（例如「32 碼英數」）。";
+          "」的" + where + "欄裡是一把金鑰。這張表單只有代號／標題／說明，" +
+          "沒有一格是填金鑰的——把它清空、按存檔，接著就會跳出填金鑰的畫面。";
       }
     }
     return "";

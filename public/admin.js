@@ -579,10 +579,19 @@ function saveApp(btn){
   if((formState.fields||[]).length && !fields.length){
     toast("那幾格的代號還沒填（只能用英文小寫，例如 tmdb）", "err"); return;
   }
-  /* 金鑰留空＝沿用現在這把；一把都還沒有時由 server 回人話擋下來 */
   busy(btn, "登記中…");
   api("/apps","POST",{name:n, appId:id, emoji:formState.emoji, url:u, token:k, fields:fields})
-    .then(function(d){ applyState(d); closeSheet(); toast("登記好了，現有的人都已經可以用了","ok"); })
+    .then(function(d){
+      applyState(d); closeSheet();
+      /* ⭐ 登記完**直接把填金鑰的畫面端出來**（2026-08-24 加）。
+       * 分格的 App 在登記表單裡根本沒有放值的地方（那張表單只有代號／標題／說明），
+       * 所以「登記好了」之後他會站在一個沒有金鑰的 App 前面，而唯一能填的入口是
+       * 列表上那顆「換金鑰」——實際發生過：找不到，於是把金鑰填進說明、再填進標題。
+       * 與其事後擋，不如把下一步直接遞到他面前。 */
+      var made = d && d.appId ? appById(d.appId) : null;
+      if (made && !made.hasToken) { toast("登記好了，接著把金鑰填進來","ok"); openKeyForm(made.id); return; }
+      toast("登記好了，現有的人都已經可以用了","ok");
+    })
     .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="登記"; } });
 }
 function openKeyForm(id){
