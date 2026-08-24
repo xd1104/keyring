@@ -852,11 +852,14 @@ function appSheetDraw(a, f, donor) {
     (a ? "" : fieldsEditorHtml(f.fields, f.appId)) +
     (a || f.fields.length ? "" :
       '<label class="field"><span class="fl">金鑰（選填）</span>' +
-      '<textarea id="f-token" autocapitalize="off" autocomplete="off" placeholder="' +
-        (donor ? "留空就沿用「" + esc(donor.name) + "」那一把" : "第一個 App，這次一定要貼一把進來") + '"></textarea>' +
-      '<span class="hint">' + (donor
-        ? "不填就沿用你最近貼的那一把（Benson 的 App 多半共用同一把）。"
-        : "fine-grained PAT，只授權那一個 repo 的 Contents。") + '</span></label>') +
+      '<textarea id="f-token" autocapitalize="off" autocomplete="off" placeholder="留空＝之後再填"></textarea>' +
+      /* ⛔ 這裡以前寫「留空就沿用○○○那一把」，而且真的會抄過來。那等於讓金鑰在
+       * App 之間流動，違反鐵律：每個 App 一把 fine-grained PAT、只授權它自己那一個
+       * repo。實際後果是新登記的 App 被塞了一把能寫別人 repo 的 GitHub PAT。
+       * 電腦端已經拿掉，手機端這一份是**另一套實作**（直接寫 vault，不走 server），
+       * 所以要各修一次——這就是同一個規則存在兩個地方的代價。 */
+      '<span class="hint">fine-grained PAT，只授權那一個 repo 的 Contents。' +
+      '刻意不從別的 App 沿用——每個 App 一把。留空的話登記完再填也可以。</span></label>') +
     actsHtml(),
     function () {
       wirePicks("f-emoji", function (v) { f.emoji = v; });
@@ -879,12 +882,9 @@ function appSheetDraw(a, f, donor) {
         var rawFields = f.fields.length ? readFieldsEditor(f.fields) : [];
         var fields = KF.normFields(rawFields);
         if (rawFields.length && !fields.length) return toast("那幾格的代號還沒填（只能用英文小寫，例如 tmdb）", true);
+        /* 沒填就是「還沒有金鑰」——**不從別的 App 沿用**（見上面的說明），
+         * 也不擋：分格的 App 正常流程本來就是登記完再一格一格填。 */
         var token = $("f-token") ? $("f-token").value.trim() : "";
-        if (!token) {
-          if (fields.length) token = "";                 /* 分格的 App：登記完再按「換一把金鑰」一格一格填 */
-          else if (!donor) return toast("這是第一個 App，還沒有金鑰可以沿用 —— 這次要貼一把進來", true);
-          else token = donor.token;
-        }
         runSave(btn, "登記了 " + name, function () {
           var id = uniqueId(wanted || newId("app"), ST.P.apps.map(function (x) { return x.id; }));
           ST.P.apps.push({ id: id, name: name, emoji: f.emoji, url: url, token: token, fields: fields });

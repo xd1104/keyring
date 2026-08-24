@@ -56,6 +56,20 @@ function groupA() {
   head("A  共用邏輯（client/keyring-fields.js）");
   const F = KF.presetFor("movie-library").fields;
 
+  /* A0：「每個 App 一把、不從別的 App 沿用」這條規則**同時活在兩套實作裡**——
+   * server.js（電腦端）與 web/admin.js（手機端直接寫 vault，不走 server）。
+   * 2026-08-24 只修了電腦端，手機端照樣沿用，等於沒修。這條就是防這件事再發生：
+   * 原始碼層級掃「把別的 App 的 token 抄過來」的痕跡。 */
+  const donorHits = [];
+  for (const rel of ["server.js", "web/admin.js", "public/admin.js"]) {
+    const src = fs.readFileSync(path.join(ROOT, rel), "utf8");
+    /* 只看真的會執行的賦值，註解裡講這段歷史不算 */
+    const code = src.split("\n").filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l)).join("\n");
+    if (/=\s*donor\.token|token\s*=\s*donor\b/.test(code)) donorHits.push(rel);
+  }
+  check("A0. ★ 兩套實作都沒有「沿用別的 App 的金鑰」（鐵律：一個 App 一把）",
+    donorHits.length === 0, donorHits.join("、") || "server.js／web/admin.js／public/admin.js 都乾淨");
+
   check("A1. 沒宣告欄位一律回 []（舊資料、壞資料都是）",
     eq(KF.normFields(undefined), []) && eq(KF.normFields(null), []) && eq(KF.normFields("abc"), []) &&
     eq(KF.normFields([{}, { key: "" }, 3]), []) && KF.isMulti({}) === false && KF.isMulti({ fields: [] }) === false,
