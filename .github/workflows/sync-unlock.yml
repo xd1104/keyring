@@ -32,8 +32,12 @@ jobs:
       fail-fast: false
       matrix:
         app:
-          - { repo: xd1104/travel-book,    label: 旅途手帳 }
-          - { repo: xd1104/benson-receipe, label: 食譜本 }
+          # dirs＝那個 App 要放模組的資料夾（空白分隔）。多數 App 是 public + docs
+          # （docs 是 build.js 的鏡射產物，但它進版控、build.js 只跑在 Benson 電腦上，
+          # 所以兩份都由 CI 寫）；trade-log 沒有那套建置，前端直接住在 js/。
+          - { repo: xd1104/travel-book,    label: 旅途手帳, dirs: "public docs" }
+          - { repo: xd1104/benson-receipe, label: 食譜本,   dirs: "public docs" }
+          - { repo: xd1104/trade-log,      label: 交易日誌, dirs: "js" }
 
     steps:
       # token 還沒設就好好講一句然後跳過，不要讓 checkout 噴一坨看不懂的認證錯誤。
@@ -67,13 +71,12 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         env:
           LABEL: ${{ matrix.app.label }}
+          DIRS: ${{ matrix.app.dirs }}
         run: |
           set -euo pipefail
           SRC=keyring/client/keyring-unlock.js
 
-          # docs/ 是 build.js 從 public/ 鏡射出來的產物，但它有進版控，
-          # 而 build.js 只跑在 Benson 的電腦上——所以兩份都要寫。
-          for dir in public docs; do
+          for dir in $DIRS; do
             if [ ! -d "app/$dir" ]; then
               echo "::error::$LABEL 沒有 $dir/，這個 App 的結構跟預期不一樣，先確認再說"
               exit 1
@@ -89,7 +92,7 @@ jobs:
 
           git config user.name  "keyring-sync"
           git config user.email "keyring-sync@users.noreply.github.com"
-          git add public/keyring-unlock.js docs/keyring-unlock.js
+          for dir in $DIRS; do git add "$dir/keyring-unlock.js"; done
           git commit -m "chore: 同步鑰匙圈解鎖模組（keyring@${GITHUB_SHA:0:7}）"
           git push
           echo "$LABEL 已更新"
