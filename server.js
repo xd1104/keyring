@@ -213,10 +213,16 @@ function buildVaultPayload() {
   return {
     version: 1,
     updatedAt: S.updatedAt,
-    apps: S.apps.map((a) => ({
-      id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
-      fields: KF.normFields(a.fields), public: !!a.public,
-    })),
+    apps: S.apps.map((a) => {
+      const o = {
+        id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
+        fields: KF.normFields(a.fields), public: !!a.public,
+      };
+      /* 開場外觀：沒設就整個鍵都不要出現（空值不落地，見 keyring-fields.js 那一段） */
+      const sp = KF.normSplash(a.splash);
+      if (sp) o.splash = sp;
+      return o;
+    }),
     users: S.users.map((u) => ({
       id: u.id, name: u.name, emoji: u.emoji, theme: u.theme,
       salt: u.salt, dk: u.dk, apps: (u.apps || []).slice(),
@@ -252,13 +258,19 @@ function adoptPayload(p) {
   S = {
     version: 1,
     updatedAt: p.updatedAt || new Date().toISOString(),
-    apps: (p.apps || []).map((a) => ({
-      id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
-      /* ⚠️ 他手機上還快取著的**舊版後台**不認得 fields／public，送上來的資料根本沒有那些鍵。
-       *    那是「這版不認得」不是「他要清空／關掉」→ 保留這台電腦原本的設定。 */
-      fields: KF.adoptFields(a, S.apps.find((x) => x.id === a.id)),
-      public: KF.adoptPublic(a, S.apps.find((x) => x.id === a.id)),
-    })),
+    apps: (p.apps || []).map((a) => {
+      const prev = S.apps.find((x) => x.id === a.id);
+      const o = {
+        id: a.id, name: a.name, emoji: a.emoji, url: a.url || '', token: a.token || '',
+        /* ⚠️ 他手機上還快取著的**舊版後台**不認得 fields／public／splash，送上來的資料
+         *    根本沒有那些鍵。那是「這版不認得」不是「他要清空／關掉」→ 保留這台電腦原本的設定。 */
+        fields: KF.adoptFields(a, prev),
+        public: KF.adoptPublic(a, prev),
+      };
+      const sp = KF.adoptSplash(a, prev);
+      if (sp) o.splash = sp;
+      return o;
+    }),
     users: (p.users || []).map((u) => ({
       id: u.id, name: u.name, emoji: u.emoji, theme: u.theme,
       salt: u.salt, dk: u.dk, apps: Array.isArray(u.apps) ? u.apps.slice() : [],
@@ -293,7 +305,12 @@ function loadSecrets() {
     };
     S.users.forEach((u) => { if (!Array.isArray(u.apps)) u.apps = []; });
     /* 舊的 secrets.json 沒有 fields → 一律正規化成 []（＝單欄位，行為完全不變） */
-    S.apps.forEach((a) => { a.fields = KF.normFields(a.fields); a.public = !!a.public; });
+    /* 舊的 secrets.json 也沒有 splash → 正規化；沒東西就把那個鍵拿掉（不要留空物件） */
+    S.apps.forEach((a) => {
+      a.fields = KF.normFields(a.fields); a.public = !!a.public;
+      const sp = KF.normSplash(a.splash);
+      if (sp) a.splash = sp; else delete a.splash;
+    });
   } catch (e) {
     if (e.code !== 'ENOENT') console.error('[secrets] 讀取失敗，改用空的鑰匙圈：', e.message);
     S = { version: 1, updatedAt: null, apps: [], users: [], github: { token: '' } };
@@ -330,6 +347,10 @@ function buildKeyring() {
        * 不綁任何使用者、不需要密碼 —— 那正是「打開網址就能用」的意思。 */
       const plain = publicPlain(a);
       if (a.public && plain !== null) { out.public = true; out.plain = plain; }
+      /* ⭐ 開場外觀：跟 public／plain 同一層級的**公開明文**，跟密文完全無關。
+       * 沒設定的項目連鍵都不會出現 —— App 端讀不到就用它自己的預設。 */
+      const sp = KF.normSplash(a.splash);
+      if (sp) out.splash = sp;
       return out;
     }),
     users: S.users.map((u) => {
@@ -630,6 +651,8 @@ function viewState() {
         public: !!a.public,
         publicBlocked: !!a.public && !!KF.publicBlockReason(a),
         publicBlockReason: a.public ? KF.publicBlockReason(a) : '',
+        /* 開場外觀：本來就是公開明文，回給畫面沒有任何顧慮（沒設定就是 null） */
+        splash: KF.normSplash(a.splash),
         users: S.users.filter((u) => (u.apps || []).indexOf(a.id) >= 0).map((u) => u.id),
       };
     }),
@@ -914,6 +937,23 @@ async function handleApi(req, res, url) {
       if (why) return sendJson(res, 400, { ok: false, message: why });
     }
     a.public = want;
+    await commitChanges();
+    return sendJson(res, 200, { ok: true, state: viewState() });
+  }
+
+  /* 開場外觀（App 啟動時中央那一塊：符號／名字／標語／三個顏色）。
+   * ⭐ 純顯示、公開明文，跟金鑰與加密流程完全無關 —— 跟 public／plain 同一層級。
+   * 空的項目不會被存起來（見 KF.normSplash）；整組都空就把 splash 這個鍵拿掉。 */
+  mt = p.match(/^\/apps\/([^/]+)\/splash$/);
+  if (mt && m === 'POST') {
+    const a = findApp(decodeURIComponent(mt[1]));
+    if (!a) return sendJson(res, 404, { ok: false, message: '找不到這個 App' });
+    const b = await readJson(req);
+    const sp = KF.normSplash(b.splash);
+    /* 自由文字會原樣躺在公開 repo 裡：這裡守一次，別讓金鑰從這條路漏出去 */
+    const why = KF.splashBlockReason(sp);
+    if (why) return sendJson(res, 400, { ok: false, message: why });
+    if (sp) a.splash = sp; else delete a.splash;
     await commitChanges();
     return sendJson(res, 200, { ok: true, state: viewState() });
   }

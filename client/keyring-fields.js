@@ -316,6 +316,206 @@
     return has ? !!incoming.public : !!(prev && prev.public);
   }
 
+  /* ==================================================================
+   * 開場外觀（splash，2026-08-25）
+   * ------------------------------------------------------------------
+   * 每個 App 啟動時中央那一塊：一個色塊符號、下面 App 名字、再下面一句標語。
+   * 以前那四樣寫死在各 App 的程式碼裡，要改就得回去改程式。現在宣告在後台，
+   * 跟著公開的 keyring.json 一起發布，App 下次啟動就跟著變。
+   *
+   * ⭐ 這是**純顯示用的公開明文**，跟 PAT 密文完全無關 —— 跟 public／plain 同一層級。
+   *    它不進任何密文、不碰解密流程；App 讀不到就用自己原本的預設值。
+   * ⭐ 每一項都可選，整個 splash 也可以不存在。**空值一律不寫進 JSON**：
+   *    「這個鍵不在」＝「這一項 App 自己決定」，語意才乾淨，公開檔也不會塞一堆空字串。
+   * ================================================================== */
+
+  var SPLASH_MAX = { name: 24, tagline: 40 };   /* 開場那一塊放不下長句，超過就是版面事故 */
+  var SPLASH_COLOR_KEYS = ["bg", "accent", "ink"];
+  /* 預覽用的預設色（跟工單上的範例同一組）。⚠️ 這只是**後台縮圖畫給他看**用的，
+   * 不會被寫進 keyring.json —— App 端沒讀到那個鍵時要用的是 App 自己的預設。 */
+  var SPLASH_DEFAULTS = { bg: "#101820", accent: "#3a7bd5", ink: "#e6edf3" };
+  var HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+  /** 色票正規化：只收 #rgb／#rrggbb，一律轉成小寫六碼。看不懂就回 ""（＝沒設定）。 */
+  function normColor(v) {
+    var t = trim(v).toLowerCase();
+    if (!HEX_RE.test(t)) return "";
+    if (t.length === 4) t = "#" + t.charAt(1) + t.charAt(1) + t.charAt(2) + t.charAt(2) + t.charAt(3) + t.charAt(3);
+    return t;
+  }
+
+  /* 會黏在前一個字上的碼位（合字符號、變體選擇子、膚色、keycap）。
+   * 刻意用碼位範圍而不是 \p{M}：這支要在很舊的瀏覽器裡也能跑，不用 unicode property escape。 */
+  function isGlue(cp) {
+    return (cp >= 0x0300 && cp <= 0x036F) || (cp >= 0xFE00 && cp <= 0xFE0F) ||
+      (cp >= 0x1F3FB && cp <= 0x1F3FF) || cp === 0x20E3 || (cp >= 0x1AB0 && cp <= 0x1AFF) ||
+      (cp >= 0x20D0 && cp <= 0x20F0);
+  }
+  /** 是不是「區域指示符號」（兩個湊成一面國旗：🇹🇼 ＝ T ＋ W）。單獨一個是半面旗，沒有意義。 */
+  function isRegional(cp) { return cp >= 0x1F1E6 && cp <= 0x1F1FF; }
+
+  /**
+   * 把字串切成「一個一個看得見的字」（字素）。
+   * 一個字素 ＝ 基底字 ＋ 後面黏著的東西：合字符號／變體選擇子／膚色／keycap／ZWJ 組合；
+   * 國旗是特例：**兩個區域指示符號才算一個**（🇹🇼 切一半會變成 🇹）。
+   */
+  function graphemes(v) {
+    var t = str(v), cps = [], i = 0, cp;
+    while (i < t.length) { cp = t.codePointAt(i); cps.push(cp); i += cp > 0xFFFF ? 2 : 1; }
+    var out = [], cur;
+    i = 0;
+    while (i < cps.length) {
+      cur = [cps[i]];
+      if (isRegional(cps[i]) && i + 1 < cps.length && isRegional(cps[i + 1])) { cur.push(cps[i + 1]); i += 2; }
+      else i++;
+      while (i < cps.length) {
+        if (isGlue(cps[i])) { cur.push(cps[i]); i++; continue; }
+        if (cps[i] === 0x200D && i + 1 < cps.length) { cur.push(cps[i], cps[i + 1]); i += 2; continue; }
+        break;
+      }
+      out.push(String.fromCodePoint.apply(String, cur));
+    }
+    return out;
+  }
+  /** 取「第一個字」：一個漢字、一個字母、或一個完整的 emoji（含 ZWJ 組合、膚色、國旗、變體選擇子）。 */
+  function firstGrapheme(v) {
+    var t = trim(v);
+    return t ? graphemes(t)[0] : "";
+  }
+  /**
+   * 按**字素**切長度，不是按 UTF-16 碼元。
+   * ⚠️ slice(0,n) 會在尾端留下**半個代理對**，而這串字是要寫進公開 keyring.json 的
+   *    —— App 端會顯示成一個 �。長度上限本來就是「看得見幾個字」的意思，用字素才對得上。
+   */
+  function sliceGraphemes(v, n) {
+    var t = trim(v);
+    if (!t) return "";
+    var g = graphemes(t);
+    return g.length <= n ? t : g.slice(0, n).join("");
+  }
+  /** 開場符號：**只留一個字元**（後台 UI 也會即時擋，這裡是最後一道）。 */
+  function normGlyph(v) { return firstGrapheme(v); }
+
+  /**
+   * 正規化整組 splash：認得的鍵才留、空的一律丟掉。
+   * 回傳 null＝這個 App 沒有任何開場設定（那就整個鍵都不要寫進去）。
+   */
+  function normSplash(v) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    var out = {}, n = 0, i, k;
+    var name = sliceGraphemes(v.name, SPLASH_MAX.name);
+    if (name) { out.name = name; n++; }
+    var glyph = normGlyph(v.glyph);
+    if (glyph) { out.glyph = glyph; n++; }
+    for (i = 0; i < SPLASH_COLOR_KEYS.length; i++) {
+      k = SPLASH_COLOR_KEYS[i];
+      var c = normColor(v[k]);
+      if (c) { out[k] = c; n++; }
+    }
+    var tag = sliceGraphemes(v.tagline, SPLASH_MAX.tagline);
+    if (tag) { out.tagline = tag; n++; }
+    return n ? out : null;
+  }
+
+  /**
+   * 接手別台改過的資料時，開場外觀要用哪一份。
+   * 跟 adoptFields／adoptPublic 同一條規則：舊版後台送上來的資料**沒有這個鍵**
+   * ＝「這版不認得」，不是「他要清掉」→ 保留原本的設定。
+   * 真的要清掉的話，新版會送 `splash: null`（有這個鍵、值是 null）。
+   */
+  function adoptSplash(incoming, prev) {
+    var has = incoming && typeof incoming === "object" &&
+      Object.prototype.hasOwnProperty.call(incoming, "splash");
+    return has ? normSplash(incoming.splash) : normSplash(prev && prev.splash);
+  }
+
+  /**
+   * 畫縮圖（跟 App 端的開場）要用的實際值：沒設定的項目補上預覽預設值。
+   * ⚠️ 只給畫面用，**不要拿它的結果去存檔**（那樣就把預設值寫死進公開檔了）。
+   */
+  function splashView(app) {
+    var a = app || {}, sp = normSplash(a.splash) || {};
+    var name = sp.name || trim(a.name) || "App";
+    return {
+      name: name,
+      glyph: sp.glyph || normGlyph(name) || "●",
+      bg: sp.bg || SPLASH_DEFAULTS.bg,
+      accent: sp.accent || SPLASH_DEFAULTS.accent,
+      ink: sp.ink || SPLASH_DEFAULTS.ink,
+      tagline: sp.tagline || ""
+    };
+  }
+
+  /* ⭐ 符號本身的字色**不是設定項、不進契約**（PM 2026-08-25 拍板）：
+   *    多一個色票給他調，就多一種「調成看不見」的可能（keyring 那顆透明按鈕的教訓：
+   *    外觀壞掉純功能測試抓不到）。**而它之所以站得住腳，是因為下面這個算法有下界**——
+   *    白字與深字各算一次真正的對比度、取高的那個，最差情況也有保證（實測 4.28:1），
+   *    不是「猜得準」。少一個他要懂的東西，而且不可能被調成看不見。
+   *    ⚠️ 這一段與 app-template 那一端**逐字相同**，改要兩邊一起改。 */
+  /* 符號字色：白字與深字各算一次 WCAG 對比度，取高的那個。
+     ⚠️ 不要改回「亮度 > 門檻」那種猜法——飽和的綠／青會被誤判成暗底而給白字，
+        實測最差只有 2.08:1（全色域 6.8% 低於 3:1）。這裡的 gamma 校正不是裝飾。 */
+  function relLum(hex){
+    var h = String(hex||"").replace("#","");
+    /* 帶 alpha 的 4／8 碼：丟掉 alpha 再算。
+       ⚠️ 這是第二道防線：上游 normColor() 只收 3／6 碼，但 keyring.json 是可以手改的，
+          而我們對外宣稱的是「不可能被調成看不見」——不能因為上游收窄了就假設不會發生。
+          （沒這一段的話 #ffffffff 會被當成 0＝純黑 → 給白字 → 白底白字 1.00:1） */
+    if(h.length === 4){ h = h.slice(0,3); }
+    if(h.length === 8){ h = h.slice(0,6); }
+    if(h.length === 3){ h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2]; }
+    if(!/^[0-9a-fA-F]{6}$/.test(h)){ return 0; }
+    var c = [0,2,4].map(function(i){
+      var v = parseInt(h.substr(i,2),16) / 255;
+      return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4);
+    });
+    return 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+  }
+  function contrast(l1, l2){
+    var hi = Math.max(l1,l2), lo = Math.min(l1,l2);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  var ON_LIGHT = "#ffffff";
+  var ON_DARK  = "#1a1310";
+  function onColor(bg){
+    var L = relLum(bg);
+    var w = contrast(1, L);               /* 白字 */
+    var d = contrast(relLum(ON_DARK), L); /* 深字 */
+    if(w >= d){ return ON_LIGHT; }
+    /* 近乎平手（差距 <15%）時偏好白字：兩者都夠讀，但深字會讓符號從
+       「發光的徽章」變成「挖空的洞」，跟開場其餘的淺色字分屬兩套語言。
+       ⚠️ 這個 15% 是拿「最差對比」換來的，動它之前先跑全色域斷言。 */
+    return (d - w) / d < 0.15 ? ON_LIGHT : ON_DARK;
+  }
+
+  /**
+   * 開場外觀是**公開明文**（會直接躺在公開 repo 的 keyring.json 裡）。
+   * 名字／標語是自由文字，而這個專案已經有過**兩次**「金鑰被貼進自由文字欄」的前科
+   * （說明、標題，見上面 hint／label 那段），所以寫入端一樣要守一次。回空字串＝沒問題。
+   *
+   * ⚠️ 守門用的是**同一支 looksSecret()**，不是另外寫一套「像不像 GitHub token」——
+   *    只擋 GitHub token 的話，TMDB 的 32 碼十六進位、sk-proj-…、AIzaSy… 全部照過。
+   *    規則分岔成兩套，遲早只修得到一邊（這個 repo 已經吃過那個虧）。
+   */
+  function splashBlockReason(sp) {
+    var s = normSplash(sp);
+    if (!s) return "";
+    var keys = ["name", "tagline", "glyph"], i, where;
+    for (i = 0; i < keys.length; i++) {
+      if (looksSecret(s[keys[i]])) {
+        where = keys[i] === "tagline" ? "標語" : keys[i] === "name" ? "開場名字" : "符號";
+        /* ⚠️ 這句是丟進 toast 的**純文字**，不要加 markdown（星號會原樣顯示成亂碼）。
+         *    手冊 D 段記過一次，這裡第二次踩到——三條路（手機 toast／電腦 toast／server 的 400）
+         *    吃的都是這一個字串，所以只要有人在這裡「順手排版」，三個地方一起壞。
+         * ⚠️ 而且**出路要講在前面**：他是在被擋下來、正在困惑的當下讀這句話，
+         *    先罵人再給解法，他得讀完整句才知道怎麼過關。 */
+        return "「" + where + "」那一格中間加個空格、或改短一點就可以存了。"
+          + "現在這串看起來像一把金鑰，而開場外觀會原樣公開在網路上（任何人都看得到），所以先擋下來。";
+      }
+    }
+    return "";
+  }
+
   /* 現成的欄位組合：Benson 只要按一下，不用自己想代號要打什麼 */
   var PRESETS = [
     {
@@ -340,6 +540,10 @@
     maskField: maskField, maskedFields: maskedFields, merge: merge, adoptFields: adoptFields,
     looksLikeGithubToken: looksLikeGithubToken, publicBlockReason: publicBlockReason,
     adoptPublic: adoptPublic, PUBLIC_WARNING: PUBLIC_WARNING,
+    SPLASH_MAX: SPLASH_MAX, SPLASH_DEFAULTS: SPLASH_DEFAULTS, SPLASH_COLOR_KEYS: SPLASH_COLOR_KEYS,
+    normColor: normColor, normGlyph: normGlyph, normSplash: normSplash,
+    onColor: onColor,
+    adoptSplash: adoptSplash, splashView: splashView, splashBlockReason: splashBlockReason,
     PRESETS: PRESETS, presetFor: presetFor
   };
 });

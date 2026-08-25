@@ -182,7 +182,13 @@ function ghToken() { return (ST.P && ST.P.github && ST.P.github.token) || ""; }
 
 /* 公開的 keyring.json —— 跟 server.js 的 buildKeyring 必須產出同一種東西 */
 function buildKeyring(p, stamp) {
-  var apps = p.apps.map(function (a) { return { id: a.id, name: a.name, emoji: a.emoji }; });
+  var apps = p.apps.map(function (a) {
+    var o = { id: a.id, name: a.name, emoji: a.emoji };
+    /* 開場外觀：公開明文，沒設定就整個鍵都不要出現（跟 server.js 的 buildKeyring 同一條規則） */
+    var sp = KF.normSplash(a.splash);
+    if (sp) o.splash = sp;
+    return o;
+  });
   return Promise.all(p.users.map(function (u) {
     var entries = (u.apps || []).map(function (appId) {
       var app = appById(appId);
@@ -496,6 +502,7 @@ function appsHtml() {
       '<div class="rc-bd"><b>' + esc(a.name) + '</b>' +
         '<div class="chips">' + (chips || '<span class="chip none">還沒給任何人</span>') + '</div>' +
         (a.public ? '<div class="keyline" style="color:#8a5b12">🌐 公開（明文放在公開 repo）</div>' : '') +
+        (KF.normSplash(a.splash) ? '<div class="keyline">🎬 ' + esc(splashSummary(KF.normSplash(a.splash))) + '</div>' : '') +
         '<div class="keyline">' + esc(a.id) + ' · ' +
           esc(a.token ? KF.maskSummary(a.fields, a.token, maskToken) : "沒有金鑰") + '</div>' +
       '</div>' +
@@ -711,6 +718,7 @@ function appMenu(a) {
       '<button id="m-edit">✏️ 改名字與樣子</button>' +
       '<button id="m-token">🔑 換一把金鑰</button>' +
       '<button id="m-fields">🧩 金鑰欄位（分成幾格）</button>' +
+      '<button id="m-splash">🎬 開場外觀（啟動畫面）</button>' +
       '<button id="m-public">🌐 公開模式' + (a.public ? '（目前：公開）' : '（目前：要密碼）') + '</button>' +
       '<button id="m-users">🧑 誰可以用</button>' +
       '<button class="danger" id="m-del">🗑 把這個 App 拿掉</button>' +
@@ -719,6 +727,7 @@ function appMenu(a) {
       $("m-edit").onclick = function () { appSheet(a); };
       $("m-token").onclick = function () { appTokenSheet(a); };
       $("m-fields").onclick = function () { appFieldsSheet(a); };
+      $("m-splash").onclick = function () { appSplashSheet(a); };
       $("m-public").onclick = function () { appPublicSheet(a); };
       $("m-users").onclick = function () { appUsersSheet(a); };
       $("m-del").onclick = function () {
@@ -828,6 +837,134 @@ function appPublicSheet(a) {
         runSave(null, "把 " + a.name + " 改回加密", function () { a.public = false; });
       };
     });
+}
+
+/* ------------------------------------------------------------------ */
+/* 開場外觀（App 啟動時中央那一塊：符號／名字／標語／三個顏色）             */
+/* 純顯示、公開明文，跟金鑰與加密完全無關 —— 跟「公開模式」同一層級。       */
+/* 全部可留白，留白＝那一項由 App 自己決定，**不會寫進 keyring.json**。      */
+/* ------------------------------------------------------------------ */
+var SP_LABELS = { bg: "開場底色", accent: "符號底色", ink: "開場文字色" };
+
+/* 列表上那一行摘要：一眼看得出這個 App 已經設過開場 */
+function splashSummary(sp) {
+  var bits = [];
+  if (sp.glyph) bits.push("符號 " + sp.glyph);
+  if (sp.name) bits.push("名字 " + sp.name);
+  if (sp.tagline) bits.push("「" + sp.tagline + "」");
+  var cols = (sp.bg ? 1 : 0) + (sp.accent ? 1 : 0) + (sp.ink ? 1 : 0);
+  if (cols) bits.push("自訂 " + cols + " 個顏色");
+  return bits.join(" · ");
+}
+
+function appSplashSheet(a) {
+  var cur = KF.normSplash(a.splash) || {};
+  var st = {
+    name: cur.name || "", glyph: cur.glyph || "", tagline: cur.tagline || "",
+    bg: cur.bg || "", accent: cur.accent || "", ink: cur.ink || ""
+  };
+  function colorRow(k) {
+    var v = st[k], d = KF.SPLASH_DEFAULTS[k];
+    return '<div class="sp-crow' + (v ? " on" : "") + '" id="sp-row-' + k + '">' +
+      '<input type="color" id="sp-' + k + '" value="' + esc(v || d) + '" aria-label="' + esc(SP_LABELS[k]) + '">' +
+      '<div class="sp-cinfo"><b>' + esc(SP_LABELS[k]) + '</b>' +
+        '<span id="sp-txt-' + k + '">' + (v ? esc(v) : "沿用 App 預設") + '</span></div>' +
+      '<button type="button" class="sp-clr" id="sp-clr-' + k + '"' + (v ? "" : " hidden") + '>改回預設</button>' +
+      '</div>';
+  }
+  /* 縮圖：沒設定的項目用 KF.splashView 的預覽預設值畫（那些值不會被存進去）。
+   * 手機上它是 sticky 的 —— 打字時鍵盤會把版面推上去，縮圖跟著留在畫面上才看得到效果。 */
+  function paint() {
+    var v = KF.splashView({ name: a.name, splash: st });
+    var prev = $("sp-prev");
+    if (!prev) return;
+    prev.style.background = v.bg;
+    /* 連 color 一起設：「預覽」那個角標用 currentColor，底色一深它就看不見了 */
+    prev.style.color = v.ink;
+    $("sp-mark").style.background = v.accent;
+    /* 符號字色不是設定項：由 accent 自動推導（PM 拍板，跟 app-template 共用同一個函式） */
+    $("sp-mark").style.color = KF.onColor(v.accent);
+    $("sp-mark").textContent = v.glyph;
+    $("sp-nm").style.color = v.ink;
+    $("sp-nm").textContent = v.name;
+    $("sp-tg").style.color = v.ink;
+    $("sp-tg").textContent = v.tagline;
+    $("sp-tg").style.visibility = v.tagline ? "visible" : "hidden";
+  }
+  function wireColor(k) {
+    var inp = $("sp-" + k);
+    if (inp) inp.oninput = function () {
+      st[k] = KF.normColor(inp.value);
+      $("sp-row-" + k).className = "sp-crow on";
+      $("sp-txt-" + k).textContent = st[k] || "沿用 App 預設";
+      $("sp-clr-" + k).hidden = false;
+      paint();
+    };
+    var clr = $("sp-clr-" + k);
+    if (clr) clr.onclick = function () {
+      st[k] = "";
+      $("sp-" + k).value = KF.SPLASH_DEFAULTS[k];
+      $("sp-row-" + k).className = "sp-crow";
+      $("sp-txt-" + k).textContent = "沿用 App 預設";
+      clr.hidden = true;
+      paint();
+    };
+  }
+  function draw() {
+    openSheet("「" + a.name + "」的開場畫面",
+      '<div class="sp-prev" id="sp-prev">' +
+        '<div class="sp-mark" id="sp-mark"></div>' +
+        '<div class="sp-nm" id="sp-nm"></div><div class="sp-tg" id="sp-tg"></div></div>' +
+      '<div class="sp-tip">↑ 即時預覽：改下面任何一項，上面就會跟著變</div>' +
+      '<p class="note">那個 App 一打開看到的第一頁。存檔＝發布，那個 App <b>下次啟動</b>就會變。<br>' +
+        '每一項都可以留白，留白的項目由 App 自己決定（<b>不會寫進公開檔</b>）。</p>' +
+      '<label class="field"><span class="fl">開場顯示的名字</span>' +
+        '<input id="sp-name" type="text" maxlength="' + KF.SPLASH_MAX.name + '" value="' + esc(st.name) +
+        '" placeholder="留白＝用「' + esc(a.name) + '」"></label>' +
+      '<label class="field"><span class="fl">符號（只能一個字）</span>' +
+        '<input id="sp-glyph" type="text" value="' + esc(st.glyph) + '" autocomplete="off" ' +
+        'placeholder="留白＝用名字的第一個字">' +
+        '<span class="hint">一個字或一個符號都可以（中文字、英文字母、emoji）。打第二個字不會吃進去。</span></label>' +
+      colorRow("bg") + colorRow("accent") + colorRow("ink") +
+      '<label class="field"><span class="fl">標語（選填）</span>' +
+        '<input id="sp-tag" type="text" maxlength="' + KF.SPLASH_MAX.tagline + '" value="' + esc(st.tagline) +
+        '" placeholder="例：紀律比行情重要"></label>' +
+      '<div class="fr-acts"><button type="button" id="sp-reset">全部改回 App 預設</button></div>' +
+      actsHtml("存起來"),
+      function () {
+        $("sp-name").oninput = function () { st.name = this.value; paint(); };
+        $("sp-tag").oninput = function () { st.tagline = this.value; paint(); };
+        /* 符號只能一個字：**在輸入框當場擋**。
+         * ⚠️ 注音／拼音組字中不能動 value（會把他打到一半的字打斷）→ isComposing 時只畫預覽。 */
+        $("sp-glyph").oninput = function (e) {
+          var one = KF.normGlyph(this.value);
+          if (!(e && e.isComposing) && this.value !== one) this.value = one;
+          st.glyph = one;
+          paint();
+        };
+        $("sp-glyph").onblur = function () {
+          var one = KF.normGlyph(this.value);
+          if (this.value !== one) this.value = one;
+          st.glyph = one;
+          paint();
+        };
+        wireColor("bg"); wireColor("accent"); wireColor("ink");
+        $("sp-reset").onclick = function () {
+          st = { name: "", glyph: "", tagline: "", bg: "", accent: "", ink: "" };
+          draw();
+        };
+        wireActs(function (btn) {
+          var out = KF.normSplash(st);          /* 空的項目在這裡就被丟掉，不會存進去 */
+          var why = KF.splashBlockReason(out);
+          if (why) return toast(why, true);
+          runSave(btn, "改了 " + a.name + " 的開場外觀", function () {
+            if (out) a.splash = out; else delete a.splash;
+          });
+        });
+      });
+    paint();
+  }
+  draw();
 }
 
 function appFieldsSheet(a) {

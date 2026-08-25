@@ -148,3 +148,30 @@ h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
 .fr-opt{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);white-space:nowrap;}
 .fr-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:2px;}
 .fr-acts button{min-height:38px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:#fff;font-size:13.5px;color:var(--ink);}
+
+/* 開場外觀（App 啟動時中央那一塊）的編輯器 —— 跟本機後台同一套語彙。
+   縮圖用 sticky：手機打字時鍵盤把版面推上去，縮圖要留在畫面上他才看得到效果。 */
+.sp-prev{position:sticky; top:-2px; z-index:3; height:170px; border-radius:18px; margin-bottom:7px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+  overflow:hidden; box-shadow:0 4px 16px rgba(40,30,15,.18); transition:background .12s;}
+.sp-mark{width:62px; height:62px; border-radius:18px; display:flex; align-items:center; justify-content:center;
+  font-size:31px; font-weight:800; line-height:1; transition:background .12s,color .12s;}
+.sp-nm{font-size:16.5px; font-weight:800; text-align:center; padding:0 14px; line-height:1.35; overflow-wrap:anywhere;}
+.sp-tg{font-size:12.5px; text-align:center; padding:0 16px; opacity:.72; line-height:1.5; overflow-wrap:anywhere;}
+/* 「這是預覽」的字放在框**外面**：放框裡會跟置中的符號打架（實測疊在一起） */
+.sp-tip{text-align:center; font-size:11.5px; color:var(--muted); line-height:1.5; margin-bottom:12px;}
+.sp-crow{display:flex; align-items:center; gap:11px; padding:9px 11px; margin-bottom:10px;
+  border:1.5px solid var(--line); border-radius:13px; background:#fbfaf6;}
+.sp-crow.on{background:#fff; border-color:#d8cfbf;}
+.sp-crow input[type=color]{flex:0 0 auto; width:52px; height:44px; padding:0; border:1px solid var(--line);
+  border-radius:10px; background:#fff;}   /* 44px：手指點得到的最小尺寸 */
+.sp-cinfo{flex:1; min-width:0;}
+.sp-cinfo b{display:block; font-size:14px;}
+.sp-cinfo span{display:block; font-size:12px; color:var(--muted);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+.sp-clr{flex:0 0 auto; min-height:44px; padding:0 12px; border-radius:10px; border:1px solid var(--line);
+  background:#fff; font-size:13px; color:var(--muted);}
+/* 「全部改回 App 預設」：它借用 .fr-acts 的版面，但那個 class 是「金鑰欄位」那張 sheet 共用的，
+   所以只把這一顆拉到 44px，不動共用規則（動它會改到這輪沒驗過的畫面）。
+   ⚠️ .fr-acts button 在金鑰欄位那張 sheet 仍然是 38px —— 已知、另案。 */
+#sp-reset{min-height:44px;}

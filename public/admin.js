@@ -281,12 +281,14 @@ function adApps(){
       +   (a.public ? '<div class="keyline" style="color:#8a5b12">🌐 公開：這個 App 的金鑰是<b>明文</b>放在公開 repo，任何人都看得到</div>' : '')
       +   (a.publicBlocked ? '<div class="keyline" style="color:#d64545">⛔ 勾了公開但被擋下來了（值看起來是 GitHub token），目前仍然是加密的</div>' : '')
       +   '<div class="keyline">'+esc(a.masked||"（還沒有金鑰）")+'</div>'
+      +   (a.splash ? '<div class="keyline">🎬 開場外觀：'+esc(splashSummary(a.splash))+'</div>' : '')
       +   ((a.fields||[]).length && a.fieldsOk===false
             ? '<div class="keyline" style="color:#8a5b12">⚠ 這個 App 分了 '+a.fields.length+' 格，但存的東西還是舊格式 —— 按「換金鑰」確認一次</div>' : '')
       +   '<div class="chips">'+chips+'</div></div>'
       + '<div class="rc-acts">'
       +   '<button onclick="openKeyForm(\''+a.id+'\')">換金鑰</button>'
       +   '<button onclick="openFieldsForm(\''+a.id+'\')">金鑰欄位</button>'
+      +   '<button onclick="openSplashForm(\''+a.id+'\')">開場外觀</button>'
       +   '<button onclick="openPublicForm(\''+a.id+'\')">'+(a.public?'公開中':'公開')+'</button>'
       +   '<button onclick="openAppWho(\''+a.id+'\')">誰可以用</button>'
       +   '<button class="danger" onclick="askDeleteApp(\''+a.id+'\')">刪除</button>'
@@ -712,6 +714,127 @@ function savePublic(id, on, btn){
     .then(function(d){ applyState(d); closeSheet();
       toast(on?"設成公開了，那個 App 打開網址就能用":"已經改回加密（要選人＋密碼）","ok"); })
     .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent=on?"我知道會被看到，設成公開":"關掉公開，改回要密碼"; } });
+}
+
+/* ---------- 開場外觀（App 啟動時中央那一塊） ----------
+ * 純顯示、公開明文，跟金鑰／加密完全無關（跟「公開模式」同一層級）。
+ * 全部可留白：留白＝那一項由 App 自己決定，**不會被寫進 keyring.json**。 */
+var SP_LABELS = { bg:"開場底色", accent:"符號底色", ink:"開場文字色" };
+
+/* 列表上那一行摘要：他一眼要看得出這個 App 已經設過開場 */
+function splashSummary(sp){
+  var bits=[];
+  if(sp.glyph) bits.push("符號 "+sp.glyph);
+  if(sp.name) bits.push("名字 "+sp.name);
+  if(sp.tagline) bits.push("「"+sp.tagline+"」");
+  var cols=(sp.bg?1:0)+(sp.accent?1:0)+(sp.ink?1:0);
+  if(cols) bits.push("自訂 "+cols+" 個顏色");
+  return bits.join(" · ");
+}
+
+function openSplashForm(id){
+  var a=appById(id), sp=a.splash||{};
+  formState={ mode:"splash", id:id, appName:a.name,
+    sp:{ name:sp.name||"", glyph:sp.glyph||"", bg:sp.bg||"", accent:sp.accent||"", ink:sp.ink||"", tagline:sp.tagline||"" } };
+  drawSplashForm();
+}
+function splashColorRow(k){
+  var v=formState.sp[k], d=KF.SPLASH_DEFAULTS[k];
+  return '<div class="sp-crow'+(v?' on':'')+'" id="sp-row-'+k+'">'
+    + '<input type="color" id="sp-'+k+'" value="'+esc(v||d)+'" oninput="splashColorIn(\''+k+'\',this.value)"'
+    +   ' aria-label="'+esc(SP_LABELS[k])+'">'
+    + '<div class="sp-cinfo"><b>'+esc(SP_LABELS[k])+'</b>'
+    +   '<span id="sp-txt-'+k+'">'+(v?esc(v):'沿用 App 預設')+'</span></div>'
+    + '<button type="button" class="sp-clr" id="sp-clr-'+k+'" onclick="splashColorClear(\''+k+'\')"'
+    +   (v?'':' hidden')+'>改回預設</button>'
+    + '</div>';
+}
+function drawSplashForm(){
+  var f=formState.sp;
+  openDialog('<div class="sheet-head"><h3>「'+esc(formState.appName)+'」的開場畫面</h3>'
+    + '<button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + '<div class="hint" style="margin-top:0">那個 App 一打開看到的第一頁。存檔＝發布，那個 App <b>下次啟動</b>就會變。<br>'
+    +   '每一項都可以留白，留白的項目由 App 自己決定（<b>不會寫進公開檔</b>）。</div>'
+    + '<div class="sp-wrap">'
+    +   '<div class="sp-col"><div class="sp-prev" id="sp-prev"><div class="sp-mark" id="sp-mark"></div>'
+    +     '<div class="sp-nm" id="sp-nm"></div><div class="sp-tg" id="sp-tg"></div></div>'
+    +     '<div class="sp-tip">即時預覽<br>改右邊就會跟著變</div></div>'
+    +   '<div class="sp-form">'
+    +     '<label class="field"><span class="fl">開場顯示的名字</span>'
+    +       '<input id="sp-name" maxlength="'+KF.SPLASH_MAX.name+'" value="'+esc(f.name)+'"'
+    +       ' placeholder="留白＝用「'+esc(formState.appName)+'」" oninput="splashTextIn()"></label>'
+    +     '<label class="field"><span class="fl">符號（只能一個字）</span>'
+    +       '<input id="sp-glyph" value="'+esc(f.glyph)+'" placeholder="留白＝用名字的第一個字"'
+    +       ' autocomplete="off" oninput="splashGlyphIn(event,this)" onblur="splashGlyphIn(null,this)"></label>'
+    +     '<div class="hint">一個字或一個符號都可以（中文字、英文字母、emoji）。打第二個字不會吃進去。</div>'
+    +     splashColorRow("bg")+splashColorRow("accent")+splashColorRow("ink")
+    +     '<label class="field"><span class="fl">標語（選填）</span>'
+    +       '<input id="sp-tag" maxlength="'+KF.SPLASH_MAX.tagline+'" value="'+esc(f.tagline)+'"'
+    +       ' placeholder="例：紀律比行情重要" oninput="splashTextIn()"></label>'
+    +   '</div>'
+    + '</div>'
+    + '<button class="btn-primary" onclick="saveSplash(this)">存起來</button>'
+    + '<button class="btn-ghost" onclick="splashClearAll()">全部改回 App 預設</button>', "sp-name");
+  splashPaint();
+}
+/* 打字時把值收進 formState 再重畫縮圖（不重畫整個對話框，游標才不會跳掉） */
+function splashTextIn(){
+  if($("sp-name")) formState.sp.name=$("sp-name").value;
+  if($("sp-tag")) formState.sp.tagline=$("sp-tag").value;
+  splashPaint();
+}
+/* 符號只能一個字：**在輸入框當場擋**（不是存檔才報錯）。
+ * ⚠️ 中文注音／拼音輸入法組字中不能動 value，會把他打到一半的字打斷 → isComposing 時只畫預覽。 */
+function splashGlyphIn(ev, el){
+  var one=KF.normGlyph(el.value);
+  if(!(ev && ev.isComposing) && el.value!==one) el.value=one;
+  formState.sp.glyph=one;
+  splashPaint();
+}
+function splashColorIn(k, v){
+  formState.sp[k]=KF.normColor(v);
+  var row=$("sp-row-"+k), txt=$("sp-txt-"+k), clr=$("sp-clr-"+k);
+  if(row) row.className="sp-crow on";
+  if(txt) txt.textContent=formState.sp[k]||"沿用 App 預設";
+  if(clr) clr.hidden=false;
+  splashPaint();
+}
+function splashColorClear(k){
+  formState.sp[k]="";
+  var row=$("sp-row-"+k), txt=$("sp-txt-"+k), clr=$("sp-clr-"+k), inp=$("sp-"+k);
+  if(inp) inp.value=KF.SPLASH_DEFAULTS[k];
+  if(row) row.className="sp-crow";
+  if(txt) txt.textContent="沿用 App 預設";
+  if(clr) clr.hidden=true;
+  splashPaint();
+}
+function splashClearAll(){
+  formState.sp={ name:"", glyph:"", bg:"", accent:"", ink:"", tagline:"" };
+  drawSplashForm();
+}
+/* 縮圖：沒設定的項目用 KF.splashView 的預覽預設值畫出來（那些值不會被存進去） */
+function splashPaint(){
+  var v=KF.splashView({ name:formState.appName, splash:formState.sp });
+  var prev=$("sp-prev"), mark=$("sp-mark"), nm=$("sp-nm"), tg=$("sp-tg");
+  if(!prev) return;
+  prev.style.background=v.bg;
+  /* 連 color 一起設：「預覽」那個角標用 currentColor，底色一深它就看不見了 */
+  prev.style.color=v.ink;
+  /* 符號字色不是設定項：由 accent 自動推導（PM 拍板，跟 app-template 共用同一個函式） */
+  mark.style.background=v.accent; mark.style.color=KF.onColor(v.accent); mark.textContent=v.glyph;
+  nm.style.color=v.ink; nm.textContent=v.name;
+  tg.style.color=v.ink; tg.textContent=v.tagline;
+  tg.style.visibility=v.tagline?"visible":"hidden";
+}
+function saveSplash(btn){
+  var sp=KF.normSplash(formState.sp);   /* 空的項目在這裡就被丟掉，不會送出去 */
+  var why=KF.splashBlockReason(sp);
+  if(why){ toast(why,"err"); return; }
+  busy(btn);
+  api("/apps/"+encodeURIComponent(formState.id)+"/splash","POST",{splash:sp})
+    .then(function(d){ applyState(d); closeSheet();
+      toast(sp?"存好了，那個 App 下次啟動就會變":"開場外觀改回 App 自己的預設了","ok"); })
+    .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="存起來"; } });
 }
 
 function openAppWho(id){
