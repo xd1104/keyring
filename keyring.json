@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-08-24T13:19:27.901Z",
+  "updatedAt": "2026-08-25T02:33:14.594Z",
   "apps": [
     {
       "id": "travel-book",
@@ -18,6 +18,11 @@
       "emoji": "📓",
       "public": true,
       "plain": "{\"tmdb\":\"c120958563d41ddc7b39e075faa0a94c\",\"omdb\":\"8b8610ec\"}"
+    },
+    {
+      "id": "trade-log",
+      "name": "交易日誌",
+      "emoji": "📦"
     }
   ],
   "users": [
@@ -33,12 +38,16 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "YS9unIVvlKsmXAQz",
-          "cipher": "rSGnbQlGNh44E/NnWOcedfiP9uQjHtW3fAQ0sZ8aFhZ8iwVCvTd2lkSeorsjBt+qdNcp8lZiUjueo/WxbJ7tUpAkR/NR0h62/C4n75vgOjzN1HsmlW62rx8HaKbqtpBKpLYOWAzk2m6hO6/Xrg=="
+          "iv": "aeP9pTnWtTM/34vO",
+          "cipher": "Ll15g/t4xm8cmqgyzRwS1GqLFvlcPZ3LAEqTDIa1TEKxGJp83RoSAtKS7HLJlUaw5p+ivt59L6FgqmA4NUtfOMXo3+F7jwYHsqsrXlTx2ObW7aVzNHoLjBXFD2MnFL6TbC8lKoLeqBniN8TBew=="
         },
         "recipe-book": {
-          "iv": "N1EcqN3VvbxieaUz",
-          "cipher": "VZOgGsYVBtg04qwWb3inOSPOubmsVWbTRPQU359B82Wm/RLVzXjjEPhgO7hIeXUU1wHDtVakaj4IDjB+Gle7Nz0MFeyIv/wxADnRqvzlfOn2F8Ddfrgnkrhw0Q/FiVJJK0A/tKe65M2BiSAQGQ=="
+          "iv": "oo5cji7k5/caZX8+",
+          "cipher": "awn7S8yHISuosBmLGjlboXvJxCNJ+MVvX4t23LjIJkcXMxuHeaHhV6Yplm4b1cZ+KAPN4N1QCsGXMY1IkI7fh65VJo4P9Kq7R1XCrtLKSxBY9+ZvAvTolF/ExF9kvysxgzZbuvngBDkWvdFfDw=="
+        },
+        "trade-log": {
+          "iv": "0sN1ExEo76bRmQAN",
+          "cipher": "68WSQfnqIgJHm2hddYe+rRoNLoyRkXIo4ybD6ak2FSlY6Fp9k+1bEq3qvmB8hCX2j5B+WbqqufTfnGFcAJZmwgwRQ9Lq+IwmDR+Yz3Mv69R76GoJd2lnDlE0tmSKJfhHDXtcnt6zLAr/yniCxg=="
         }
       }
     },
@@ -54,12 +63,16 @@
       },
       "apps": {
         "travel-book": {
-          "iv": "61A5kQP4I8pUCrwR",
-          "cipher": "8JsU5Kol3ZUQZQtsDOzpmDXShtTZu0PW++hyQQW18FMi0UuzgYr/O1v4UgEaKG2Fp4xeUjCdQt+edVKUbMsYfakZ7fel2aUwfvyJJONbI6+ZFisvGUuf8EhFk/yBSXNdPQxxGqsur/Z1W3i3iQ=="
+          "iv": "iUd9AWifmjmNWgzE",
+          "cipher": "C35SFRhgGUqJ6tBbCq3UDNVyfJQgRObALTJ0jZ0ST8HosmX4P4OW/fkBaL5GAWbagbzFRai6UK8jzIZGBqH+btj50esZHi1ZqIyQzkwVd6b1YT6p+we2QnDbeM5p+mLH+rxRqNHTRjbZ3uxgTw=="
         },
         "recipe-book": {
-          "iv": "5pBjOBEhLdHv2Ijm",
-          "cipher": "d3l6ZhjoV1dvS3PUjCfFte6R2VNSTTsEU7NVnYHVtNfzWe4KjNCFASvwAcOg//FI43Zi+TUGe9mVl8STlVErS4+sHL7dd9r+egGKBogcTnCL79+4Jg91BGxYYrK479zO/qB9oomsWFVuW/diBQ=="
+          "iv": "llhSDJdLXasFMZRJ",
+          "cipher": "npz4kQF1IHWsL4+aRNFqRsG1NWjpp/nq9nreJIby82SEZQdEv6eXPML9neF159U+dKx/Aqc19JEWWsYG1JCW9o2h4Xhq3zqjQgIPStsZXooS6nxKNgsAfCaNrOjybD8lOfbw+67Rn5KM1YHVqw=="
+        },
+        "trade-log": {
+          "iv": "Qq73tUYzLjZlqj3h",
+          "cipher": "3oSzdDNhFJbe09ZmUemjnubzjYl2gI5IP71PvQQ3mIwYLNPnqRALz92Rl2l4rfoEhGUhzRkDpPR/FAOC2jkGUMdHirOKdrhDKuxouhWCxjFuhe/1+8EUtRpuPyFCUEL3a28xuQ4G/FKeOqrlyw=="
         }
       }
     }
