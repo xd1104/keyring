@@ -48,7 +48,27 @@ Pages 是純靜態、**沒有伺服器可以驗密碼**。所以：
 
 ## 怎麼開
 
-雙擊 `start.bat`，或用 tool-manager 面板 →「AI 工具」→ 鑰匙圈。網址 <http://localhost:4620>。
+**桌面 App（推薦）**：雙擊桌面的「🔑 鑰匙圈」。它會先確認伺服器活著（沒有就開起來），
+再**自己開一個視窗**（pywebview，底層是 Windows 11 內建的 WebView2）；視窗關掉就整組收乾淨。
+工作列顯示的是鑰匙圖示、不是 Edge 或 python 的。
+
+也可以雙擊 `start.bat`，或用 tool-manager 面板 →「AI 工具」→ 鑰匙圈。網址 <http://localhost:4620>。
+
+### 桌面 App 的三個細節（別誤改）
+
+- **`server.js` 仍然是零執行期依賴**。多出來的 `.venv`（pywebview ＋ pythonnet）
+  只給 `keyring-app.pyw` 那支「開視窗」用，伺服器本身沒有變。
+- **`.venv/` 一定要留在 `.gitignore` 裡**：後台「存檔即發布」跑的是 `git add -A` ＋ push 到
+  **公開** repo，沒忽略的話那幾十 MB 會被推上去。
+- **不要改用 Edge 的 `--app` 開視窗**：那樣視窗的擁有者是 Edge，工作列會顯示 Edge 的圖示
+  （安裝成 PWA 也一樣），而且關窗時機測不準。這是 trade-log 的早盤儀表板踩過整串才換掉的，
+  `keyring-app.pyw` 的註解裡有完整原因。
+- **刻意沒有看門狗**。早盤儀表板需要它是因為永豐 SDK 斷線會把行程帶走；
+  這裡的 server 沒有外部 SDK，沒那個故障模式。
+
+圖示是 `make-icon.py` 產的（純標準函式庫，沒有 Pillow 也能跑）：
+`.venv\Scripts\python.exe make-icon.py`。**16px 以下是另外畫一張**，不是把大圖縮小——
+等比縮下去會糊成一團暗色斑點（第一版實際踩過）。
 手機後台在 <https://xd1104.github.io/keyring/web/>（本機也開得起來：<http://localhost:4620/web/>，
 拿來在電腦上先試一遍）。
 

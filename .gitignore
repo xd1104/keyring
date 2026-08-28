@@ -3,6 +3,13 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# 桌面 App 啟動器用的 Python 環境（只有「開視窗」那一支需要它，server.js 仍是零依賴）。
+# ⚠️ 一定要忽略：後台「存檔即發布」跑的是 git add -A ＋ push 到**公開** repo，
+#    沒忽略的話這幾十 MB 會被推上去。
+.venv/
+__pycache__/
+*.pyc
+
 # ⚠️ 明文金鑰與每個人的加密金鑰只存這台電腦，永遠不進 repo
 secrets.json
 # ⚠️ 解 vault.json 的金鑰與裝置配對碼。上傳它 = 公開的 vault.json 直接被解開
