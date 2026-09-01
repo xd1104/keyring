@@ -1365,8 +1365,14 @@ const server = http.createServer(async (req, res) => {
 
 loadSecrets();
 loadVaultKey();
-server.listen(PORT, async () => {
-  console.log('Keyring admin running at http://localhost:' + PORT);
+/* ⚠️ 一定要綁 127.0.0.1，不能只給 PORT（那等於 0.0.0.0＝所有網路介面）。
+ * 這個後台**沒有密碼**（設計前提是「只有這台電腦」），但它可以新增使用者、
+ * 換金鑰、觸發發布。綁全介面的話，同一個 Wi-Fi 上的任何人打
+ * http://<這台電腦的IP>:4620 就進得來 —— 咖啡廳、公司網路都算。
+ * （2026-08-28 發現：tool-manager 從一開始就綁 127.0.0.1，這裡漏了。）
+ * 手機後台走的是 GitHub Pages 上的 vault.json，不是連這個埠，所以不受影響。 */
+server.listen(PORT, '127.0.0.1', async () => {
+  console.log('Keyring admin running at http://localhost:' + PORT + '（只接受本機連線）');
   console.log('Secrets (local only): ' + SECRETS_FILE);
   console.log('Public keyring:       ' + KEYRING_FILE);
   if (V) console.log('Mobile admin vault:   ' + VAULT_FILE + '（配對碼 ' + V.pairing + '）');
