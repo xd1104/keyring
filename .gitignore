@@ -14,4 +14,9 @@ __pycache__/
 secrets.json
 # ⚠️ 解 vault.json 的金鑰與裝置配對碼。上傳它 = 公開的 vault.json 直接被解開
 vault.key
+# 🧰 工具分頁的清單（從 tool-manager 搬過來）。刻意不公開，兩個理由：
+#    ① 裡面是這台電腦的絕對路徑與啟動指令，只對這台機器有意義；
+#    ② 它有 env 欄位，未來很可能被塞進某個工具要用的金鑰。
+#    後台「存檔即發布」跑的是 git add -A ＋ push 到**公開** repo，所以一定要忽略。
+tools.local.json
 *.tmp~*

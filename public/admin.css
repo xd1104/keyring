@@ -32,8 +32,11 @@ h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
   background:var(--acc); color:#fff; flex:0 0 auto; box-shadow:0 4px 14px rgba(226,80,63,.28);}
 .pub-btn[disabled]{opacity:.6;}
 
-.ad-tabs{display:flex; background:#ece5d6; border-radius:14px; padding:3px; margin-bottom:18px; max-width:420px;}
-.ad-tabs button{flex:1; min-height:44px; border-radius:11px; font-size:14.5px; font-weight:700; color:var(--muted);}
+/* 五個分頁（2026-09-01 多了「🧰 工具」）：原本 420px 塞四個剛好，塞五個會擠成
+ * 一行讀不出字。放寬 ＋ 允許換行，每一顆仍然 ≥44px（觸控目標下界不能因為多一個分頁就破）。*/
+.ad-tabs{display:flex; flex-wrap:wrap; background:#ece5d6; border-radius:14px; padding:3px;
+  margin-bottom:18px; max-width:560px; gap:2px;}
+.ad-tabs button{flex:1 1 100px; min-height:44px; border-radius:11px; font-size:14.5px; font-weight:700; color:var(--muted);}
 .ad-tabs button.on{background:#fff; color:var(--ink); box-shadow:0 1px 4px rgba(0,0,0,.08);}
 .sec-title{font-size:14px; font-weight:800; color:var(--muted); margin:4px 4px 10px;}
 
@@ -220,3 +223,29 @@ h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
 .expbox{background:#fff6e3; border:1px solid #f2dcae; border-radius:14px; padding:12px 14px;
   font-size:13.5px; color:#8a5b12; line-height:1.7; margin-bottom:13px;}
 .expbox b{display:block; font-size:15px; margin-bottom:3px;}
+
+/* ============================================================
+   🧰 工具分頁（2026-09-01 從 tool-manager 併進來）
+   class 前綴 tk-（跟近況那條時間軸的 .tl 不同 token，不會互相命中）
+   刻意沿用既有語言：暖米白底、rowcard／chip／rc-acts 全部重用，
+   這一段只補「狀態燈」「開啟連結」「輸出視窗」三個新東西。
+   ============================================================ */
+.tk-bar{display:flex; align-items:center; gap:10px; margin:0 4px 10px; font-size:12.5px; color:var(--muted);}
+.tk-bar span{flex:1;}
+.tk-bar button{min-height:40px; padding:0 14px; border-radius:11px; background:#f3eee4;
+  font-size:13.5px; font-weight:700; color:#6b6154;}
+.tk-dot{display:inline-block; width:8px; height:8px; border-radius:99px; margin-right:6px;
+  vertical-align:1px; background:#c8bfae;}
+.tk-dot.running{background:#2fa87a;}
+.tk-dot.starting{background:#e0a32c;}
+.tk-dot.stopped{background:#c8bfae;}
+.tk-go{display:inline-flex; align-items:center; min-height:44px; padding:0 14px; border-radius:12px;
+  background:#f3eee4; font-size:14px; font-weight:700; color:#6b6154; text-decoration:none;}
+.tk-go.off{opacity:.45;}
+.tk-log pre{margin:0; max-height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.65;
+  color:#6b6154; background:#faf6ee; border:1px solid var(--line); border-radius:12px; padding:10px 12px;}
+.ad-foot code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px;
+  background:#f3eee4; border-radius:6px; padding:1px 5px;}
+.empty code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px;
+  background:#f3eee4; border-radius:6px; padding:1px 5px;}

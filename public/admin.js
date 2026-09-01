@@ -30,6 +30,14 @@ var PUSHED = { map:{}, at:0, tried:false };
 var OPENLOG = {};      /* 哪幾張卡片被展開了 */
 var APPLOG = {};       /* appId -> 最近 3 筆 commit */
 
+/* 🧰 工具分頁（2026-09-01 從 tool-manager 搬進來，那支之後退役）。
+ * 只有電腦端有——啟動頁與手機後台都沒有這台電腦的 server，本機程式永遠開不起來。
+ * 刻意不做 3 秒輪詢（tool-manager 是那樣做的）：這個後台的 render() 是整片
+ * innerHTML 重建，每 3 秒重建一次會把滑鼠底下的按鈕抽掉（travel-book／trade-log
+ * 都踩過）。改成：進分頁載一次、按鈕手動重新整理、按了啟動／停止之後追幾次。 */
+var TOOLS = { list:null, file:{ok:true,message:""}, err:"", at:0, busy:{}, loading:false,
+              chase:0, timer:null, openLog:{}, logs:{} };
+
 /* ---------- 小工具 ---------- */
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
@@ -78,12 +86,14 @@ function render(){
     + '<div class="ad-tabs">'
     +   '<button class="'+(adTab==="apps"?"on":"")+'" onclick="setTab(\'apps\')">📦 App</button>'
     +   '<button class="'+(adTab==="users"?"on":"")+'" onclick="setTab(\'users\')">👥 使用者</button>'
+    +   '<button class="'+(adTab==="tools"?"on":"")+'" onclick="setTab(\'tools\')">🧰 工具</button>'
     +   '<button class="'+(adTab==="log"?"on":"")+'" onclick="setTab(\'log\')">🕘 近況</button>'
     +   '<button class="'+(adTab==="vault"?"on":"")+'" onclick="setTab(\'vault\')">📱 手機後台</button>'
     + '</div>'
-    + (adTab==="users" ? adUsers() : adTab==="apps" ? adApps() : adTab==="log" ? adLog() : adVault())
-    /* 手機後台那頁有自己的說明，不要再疊一段講使用者密碼的 */
-    + (adTab==="vault" ? '' :
+    + (adTab==="users" ? adUsers() : adTab==="apps" ? adApps()
+       : adTab==="tools" ? adTools() : adTab==="log" ? adLog() : adVault())
+    /* 手機後台與工具那兩頁有自己的說明，不要再疊一段講使用者密碼的 */
+    + (adTab==="vault" || adTab==="tools" ? '' :
         '<div class="ad-foot">密碼是各自加密的，這裡看不到、也救不回來。<br>'
       + '有人忘記密碼，就在這裡幫他換一組新的。金鑰的明文只留在這台電腦。<br>'
       /* 啟動頁是免密碼的那一頁（加到手機主畫面用），本機預覽在 /launch/ */
@@ -92,9 +102,12 @@ function render(){
       + '　（在這台電腦先看：<a href="/launch/" target="_blank" rel="noopener">/launch/</a>）</div>');
 }
 function setTab(t){
-  adTab=t; render();
+  adTab=t;
+  if(t!=="tools") stopToolChase();      /* 離開分頁就別再背景重建畫面 */
+  render();
   if(t==="log" && !LOG.rows && !LOG.busy) loadLog(LOG.limit);
   if(t==="apps" && !PUSHED.tried) loadPushed(false);
+  if(t==="tools" && !TOOLS.loading) loadTools();
 }
 
 /* 啟動頁的公開清單產不出來時要講原因（例如名字裡被貼了金鑰）。
@@ -460,6 +473,142 @@ function adLog(){
   return '<div class="sec-title">鑰匙圈被誰改過。存檔就是一筆紀錄，改不掉也刪不掉。</div>'
     + logRowsHtml(LOG.rows)
     + '<button class="loadmore" onclick="loadLog('+(LOG.limit+30)+')">看更早的</button>';
+}
+
+/* ---------- 🧰 工具（這台電腦上的程式） ---------- */
+/* ⚠️ 這一整段只在電腦端的後台存在。啟動頁（GitHub Pages 的公開靜態頁）與手機後台
+ *    都沒有這台電腦的 server，本機程式在那邊**永遠**啟動不了，所以那兩邊不放啟動鈕。 */
+var TOOL_CATS = ["作品","AI 工具"];
+
+function loadTools(){
+  TOOLS.loading = true;
+  return api("/tools").then(function(d){
+    TOOLS.list = d.tools || [];
+    TOOLS.file = d.file || {ok:true,message:""};
+    TOOLS.err = ""; TOOLS.at = Date.now(); TOOLS.loading = false;
+    render();
+    scheduleToolChase();
+  }).catch(function(e){
+    TOOLS.list = TOOLS.list || [];
+    TOOLS.err = e.message; TOOLS.loading = false; render();
+  });
+}
+/* 有工具正在「啟動中」才追——啟動一個有 port 的工具要好幾秒才會亮綠燈。
+ * 追完就停：不做常駐輪詢，免得整片畫面在他按按鈕的時候被重建。 */
+function scheduleToolChase(){
+  stopToolChase();
+  var starting = (TOOLS.list||[]).some(function(t){ return t.status==="starting"; });
+  if(!starting || TOOLS.chase<=0 || adTab!=="tools") { TOOLS.chase=0; return; }
+  TOOLS.chase--;
+  TOOLS.timer = setTimeout(function(){ TOOLS.timer=null; loadTools(); }, 2500);
+}
+function stopToolChase(){
+  if(TOOLS.timer){ clearTimeout(TOOLS.timer); TOOLS.timer=null; }
+}
+function toolAct(id, action, btn){
+  TOOLS.busy[id]=true;
+  if(btn){ btn.disabled=true; }
+  api("/tools/"+encodeURIComponent(id)+"/"+action,"POST").then(function(d){
+    delete TOOLS.busy[id];
+    toast({start:"啟動了",stop:"停掉了",restart:"重啟了"}[action]||"好了","ok");
+    TOOLS.chase = 4;                       /* 最多再追 4 次（約 10 秒） */
+    loadTools();
+    if(TOOLS.openLog[id]) loadToolLog(id);
+  }).catch(function(e){
+    delete TOOLS.busy[id];
+    toast(e.message,"err");
+    TOOLS.chase = 0;
+    loadTools();
+  });
+}
+function toggleToolLog(id){
+  TOOLS.openLog[id] = !TOOLS.openLog[id];
+  render();
+  if(TOOLS.openLog[id]) loadToolLog(id);
+}
+function loadToolLog(id){
+  return api("/tools/"+encodeURIComponent(id)+"/logs").then(function(d){
+    TOOLS.logs[id]=d.logs||[]; render();
+  }).catch(function(){ TOOLS.logs[id]=[]; render(); });
+}
+function toolStatusHtml(t){
+  if(t.status==="starting") return '<span class="chip warn"><i class="tk-dot starting"></i>啟動中…</span>';
+  if(t.status==="running"){
+    return '<span class="chip ok"><i class="tk-dot running"></i>運行中</span>'
+      + (t.external ? '<span class="chip warn">不是這裡開的</span>' : '');
+  }
+  return '<span class="chip none"><i class="tk-dot stopped"></i>沒在跑</span>';
+}
+function toolCard(t){
+  var busyNow = !!TOOLS.busy[t.id];
+  var running = t.status!=="stopped";
+  var open = !!TOOLS.openLog[t.id];
+  var lines = TOOLS.logs[t.id];
+  var dis = function(cond){ return cond ? ' disabled' : ''; };
+  return '<div class="rowcard stack"><div class="rc-top">'
+    + '<div class="rc-face" style="background:'+grad("sand")+'">'+esc(t.emoji)+'</div>'
+    + '<div class="rc-bd"><b>'+esc(t.name)+'</b>'
+    +   '<span class="rc-url">'+esc(t.description||"")+'</span>'
+    +   '<div class="chips">'+toolStatusHtml(t)
+    +     (t.port ? '<span class="chip">port '+esc(String(t.port))+'</span>' : '')
+    +     (t.pid ? '<span class="chip">pid '+esc(String(t.pid))+'</span>' : '')
+    +   '</div>'
+    +   (t.external && !t.stoppable
+          ? '<div class="keyline">這個是外面開的、又沒有 PID 可以認，只能去原本那個視窗關掉</div>' : '')
+    + '</div>'
+    + '<div class="rc-acts">'
+    +   '<button onclick="toolAct(\''+t.id+'\',\'start\',this)"'+dis(busyNow||running)+'>▶ 啟動</button>'
+    +   '<button class="danger" onclick="toolAct(\''+t.id+'\',\'stop\',this)"'+dis(busyNow||!running||!t.stoppable)+'>■ 停止</button>'
+    +   '<button onclick="toolAct(\''+t.id+'\',\'restart\',this)"'+dis(busyNow||!t.managed)+'>↻ 重啟</button>'
+    +   (t.url && running
+          ? '<a class="tk-go" href="'+esc(t.url)+'" target="_blank" rel="noopener">開啟 ↗</a>'
+          : (t.url ? '<span class="tk-go off" title="要先啟動才打得開">開啟 ↗</span>' : ''))
+    + '</div></div>'
+    + '<button class="rc-open" onclick="toggleToolLog(\''+t.id+'\')">'+(open?"收起 ▴":"看它印了什麼 ▾")+'</button>'
+    + (open ? '<div class="rc-log tk-log">'+(lines
+        ? (lines.length ? '<pre>'+esc(lines.join("\n"))+'</pre>'
+                        : '<p>還沒有東西。只有從這裡啟動的工具才會留下輸出。</p>')
+        : '<p>讀取中…</p>')+'</div>' : '')
+    + '</div>';
+}
+function adTools(){
+  var foot = '<div class="ad-foot">'
+    + '這一頁只有電腦上的後台有。手機與啟動頁沒有這台電腦的 server，本機程式在那邊打不開。<br>'
+    + '鑰匙圈自己不在清單裡 —— 你現在用的就是它。<br>'
+    + '清單在 <code>tools.local.json</code>（只留在這台電腦，不會被發布出去）。改完按重新整理就好。'
+    + '</div>';
+  /* 「有沒有資料」與「畫不畫面」解耦：問不到狀態時把原本那份清單留在畫面上，
+   * 只在上面加一條說「這是舊的」，不要整頁塌掉。 */
+  var errBar = TOOLS.err
+    ? '<div class="pub-bar bad"><div class="pub-txt"><b>問不到工具狀態</b>'
+      + '<span>'+esc(TOOLS.err)+(TOOLS.at?'　下面這些是 '+esc(clockOf(new Date(TOOLS.at).toISOString()))+' 的舊狀態。':'')+'</span></div>'
+      + '<div class="pub-acts"><button class="pub-btn" onclick="loadTools()">再試一次</button></div></div>'
+    : '';
+  if(TOOLS.err && (!TOOLS.list || !TOOLS.list.length)) return errBar + foot;
+  if(TOOLS.list===null) return '<div class="empty"><div class="big">🧰</div><p>正在看這些工具跑了沒…</p></div>';
+  if(TOOLS.file && TOOLS.file.ok===false){
+    return '<div class="pub-bar bad"><div class="pub-txt"><b>讀不到工具清單</b><span>'+esc(TOOLS.file.message||"")+'</span></div>'
+      + '<div class="pub-acts"><button class="pub-btn" onclick="loadTools()">再讀一次</button></div></div>' + foot;
+  }
+  if(!TOOLS.list.length){
+    return '<div class="empty"><div class="big">🧰</div><p>清單裡一個工具都沒有。<br>'
+      + '把它們寫進 <code>tools.local.json</code> 就會出現在這裡。</p></div>' + foot;
+  }
+  var cats = [];
+  TOOLS.list.forEach(function(t){ var c=t.category||"其他"; if(cats.indexOf(c)<0) cats.push(c); });
+  cats.sort(function(a,b){
+    var ia=TOOL_CATS.indexOf(a), ib=TOOL_CATS.indexOf(b);
+    return (ia<0?99:ia)-(ib<0?99:ib);
+  });
+  var body = cats.map(function(c){
+    var mine = TOOLS.list.filter(function(t){ return (t.category||"其他")===c; });
+    return '<div class="sec-title">'+esc(c)+'（'+mine.length+'）</div>'
+      + mine.map(toolCard).join("");
+  }).join("");
+  var upd = TOOLS.at ? "狀態是 "+clockOf(new Date(TOOLS.at).toISOString())+" 抓的" : "";
+  return errBar + '<div class="tk-bar"><span>'+esc(upd)+'</span>'
+    + '<button onclick="loadTools()">🔄 重新整理</button></div>'
+    + body + foot;
 }
 
 /* ---------- 金鑰到期日 ---------- */

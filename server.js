@@ -30,7 +30,8 @@ const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const https = require('https');
-const { execFile } = require('child_process');
+const net = require('net');
+const { execFile, spawn, spawnSync, exec } = require('child_process');
 /* 多欄位金鑰的共用邏輯（後台 UI 的「幾格」←→「一串」互轉）。
  * 三個地方共用同一份：這裡、public/admin.js、web/admin.js。
  * ⚠️ 它只影響「後台怎麼收集那串字」，儲存與加密格式一個位元組都沒變。 */
@@ -50,6 +51,10 @@ const LAUNCH_INDEX = path.join(ROOT, 'index.html');
 /* 本機記著的 vault 金鑰。放本機是刻意的：這台電腦本來就有明文 PAT，
  * 存了它，存檔時才不用每次再問一次管理密碼。跟 secrets.json 一樣永不上傳。 */
 const VAULTKEY_FILE = path.join(ROOT, 'vault.key');
+/* 🧰 工具分頁的清單（2026-09-01 從 tool-manager 搬進來，那支之後退役）。
+ * ⚠️ 這個檔在 .gitignore 裡，跟 secrets.json 同一級：裡面是這台電腦的絕對路徑、
+ *    啟動指令與 env（未來很可能被塞金鑰），而後台存檔跑的是 git add -A ＋ push 到公開 repo。 */
+const TOOLS_FILE = path.join(ROOT, 'tools.local.json');
 
 const PORT = process.env.PORT || 4620;
 
@@ -430,13 +435,17 @@ function gitCmd(args) {
 /* 安全閘門：secrets.json 一定要被 git 忽略，否則什麼都不做。
  * 用「白名單語意」寫：確認它真的被忽略才放行，而不是列舉禁止的檔名。 */
 async function assertSecretsSafe() {
-  for (const f of ['secrets.json', 'vault.key']) {
+  /* tools.local.json：本機工具清單。沒有密碼，但有絕對路徑與 env（很容易被塞金鑰），
+   * 而且發布跑的是 git add -A → 一樣要在 .gitignore 裡才准發布。 */
+  for (const f of ['secrets.json', 'vault.key', 'tools.local.json']) {
     await gitCmd(['check-ignore', '-q', f]).catch(() => {
       throw new Error(f + ' 沒有被 .gitignore 忽略');
     });
   }
   const status = await gitCmd(['status', '--porcelain']);
-  if (/secrets\.json|vault\.key/.test(status)) throw new Error('git 看得到 secrets.json 或 vault.key');
+  if (/secrets\.json|vault\.key|tools\.local\.json/.test(status)) {
+    throw new Error('git 看得到 secrets.json、vault.key 或 tools.local.json');
+  }
 }
 
 /* git 的英文錯誤 -> 人話 ＋ 下一步。使用者不該看到 "fatal: not a git repository"。 */
@@ -865,12 +874,284 @@ function composeToken(app, b) {
   return t ? t : null;
 }
 
+/* ================================================================== */
+/* 🧰 工具（本機程式的啟動／停止）                                       */
+/*                                                                    */
+/* 2026-09-01 從 tool-manager（原本自己一支 port 4900 的面板）整支搬進來， */
+/* 那支之後退役。⚠️ 這一段是**照抄它踩過雷的實作**，不是重寫：             */
+/*   ① Windows 要用 taskkill /t /f 殺**整棵** process tree              */
+/*      （npm／electron／python 會生一堆孫程序，只殺 pid 會留孤兒）；      */
+/*   ② 程序掃描（Get-CimInstance）一次要一秒，所以配 5 秒 TTL 快取；       */
+/*   ③ 掃描比對時要排除「管理器自己 spawn 的子孫」，否則自己開的會被        */
+/*      再判定成「外部已在跑」；                                          */
+/*   ④ 有 port 的工具 spawn 後有 20 秒寬限期顯示「啟動中」，              */
+/*      過了寬限期 port 還沒通也照樣算 running（程序活著），不要永遠卡住。  */
+/*                                                                    */
+/* ⚠️ 這裡不能出現在啟動頁（GitHub Pages 的公開靜態頁）也不能出現在手機後台： */
+/*    那兩邊都沒有這台電腦的 server，本機程式**永遠**啟動不了。只有電腦端    */
+/*    後台（127.0.0.1:4620）做得到。                                     */
+/* ⚠️ 鑰匙圈自己刻意不在清單裡——它就是面板本身，server 沒開你連這頁都看不到。*/
+/*    （先例：tool-manager 最後一筆 commit 把早盤儀表板移除，理由同一條。）  */
+/* 依賴：只用 node 內建（child_process／net），維持零執行期依賴。          */
+/* ================================================================== */
+
+const MAX_LOG_LINES = 500;
+const STARTING_GRACE_MS = 20000;
+
+/* 每個工具的執行期狀態 { child, pid, startedAt, logs:[] } */
+const toolState = new Map();
+function getToolState(id) {
+  if (!toolState.has(id)) toolState.set(id, { child: null, pid: null, startedAt: 0, logs: [] });
+  return toolState.get(id);
+}
+
+/* 清單狀態：讀不到就要**講原因**，不要靜靜給一張空清單（那長得像「你沒有工具」）。 */
+let toolsState = { ok: true, message: '' };
+
+/* 每次讀都熱重讀（改 tools.local.json 不用重開後台） */
+function readTools() {
+  let raw;
+  try {
+    raw = fs.readFileSync(TOOLS_FILE, 'utf8');
+  } catch (e) {
+    toolsState = { ok: false, message: '找不到 tools.local.json（本機工具清單）。它在 ' + TOOLS_FILE };
+    return [];
+  }
+  let list;
+  try {
+    list = JSON.parse(raw);
+  } catch (e) {
+    toolsState = { ok: false, message: 'tools.local.json 讀不懂（JSON 格式壞了）：' + firstLine(e && e.message) };
+    return [];
+  }
+  if (!Array.isArray(list)) {
+    toolsState = { ok: false, message: 'tools.local.json 必須是一個陣列' };
+    return [];
+  }
+  toolsState = { ok: true, message: '' };
+  /* 防呆：就算有人把舊的 tools.json 整份貼回來，鑰匙圈自己也不會冒出來 */
+  return list.filter((t) => t && t.id && t.id !== 'keyring');
+}
+function findTool(id) { return readTools().find((t) => t.id === id) || null; }
+
+function pushToolLog(st, text, tag) {
+  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  for (const line of String(text).split(/\r?\n/)) {
+    if (line.trim() === '') continue;
+    st.logs.push('[' + ts + ']' + (tag ? ' ' + tag : '') + ' ' + line);
+  }
+  if (st.logs.length > MAX_LOG_LINES) st.logs.splice(0, st.logs.length - MAX_LOG_LINES);
+}
+
+function isManaged(st) { return st.child !== null; }
+
+function startTool(tool) {
+  const st = getToolState(tool.id);
+  if (isManaged(st)) return { ok: false, message: '已在運行中（由這個面板啟動）' };
+  const env = Object.assign({}, process.env, tool.env || {});
+  let child;
+  try {
+    child = spawn(tool.command, { cwd: tool.cwd, shell: true, windowsHide: true, env });
+  } catch (e) {
+    pushToolLog(st, '啟動失敗：' + e.message, '⚙');
+    return { ok: false, message: '啟動失敗：' + e.message };
+  }
+  st.child = child;
+  st.pid = child.pid;
+  st.startedAt = Date.now();
+  pushToolLog(st, '啟動：' + tool.command + '（pid ' + child.pid + '）', '⚙');
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (d) => pushToolLog(st, d));
+  child.stderr.on('data', (d) => pushToolLog(st, d, '⚠'));
+  child.on('error', (e) => { pushToolLog(st, '程序錯誤：' + e.message, '⚙'); st.child = null; });
+  child.on('exit', (code, signal) => {
+    pushToolLog(st, '程序結束（code=' + code + (signal ? ', signal=' + signal : '') + '）', '⚙');
+    st.child = null;
+  });
+  return { ok: true, pid: child.pid };
+}
+
+/* ⚠️ Windows 一定要 /t（整棵樹）＋ /f（強制）。npm run dev 那種是
+ * cmd → npm → node → electron 一長串，只殺最上面那個會留一堆孤兒。 */
+function killTree(pid) {
+  return spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { windowsHide: true });
+}
+
+function stopTool(tool) {
+  const st = getToolState(tool.id);
+  if (!isManaged(st)) return { ok: false, message: '不是這個面板開的，這裡停不了（去原本開它的視窗關）' };
+  const pid = st.child.pid;
+  killTree(pid);
+  pushToolLog(st, '停止（taskkill /pid ' + pid + ' /t /f）', '⚙');
+  st.child = null;   /* exit 事件也會清，先清一次避免競態 */
+  return { ok: true };
+}
+
+/* ---- 程序掃描（processMatch：偵測「不是我開的但已經在跑」） ---- */
+const PROC_CACHE_TTL = 5000;
+let procCache = { ts: 0, list: [] };
+let procScanInflight = null;
+
+function scanProcesses() {
+  if (Date.now() - procCache.ts < PROC_CACHE_TTL) return Promise.resolve(procCache.list);
+  if (procScanInflight) return procScanInflight;
+  procScanInflight = new Promise((resolve) => {
+    exec(
+      'powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"',
+      { maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout: 15000 },
+      (err, stdout) => {
+        procScanInflight = null;
+        if (err) return resolve(procCache.list);      /* 掃描失敗就用舊快取，不要謊報成「沒在跑」 */
+        try {
+          let list = JSON.parse(stdout);
+          if (!Array.isArray(list)) list = list ? [list] : [];
+          procCache = { ts: Date.now(), list };
+          resolve(list);
+        } catch (_) { resolve(procCache.list); }
+      }
+    );
+  });
+  return procScanInflight;
+}
+function invalidateProcCache() { procCache.ts = 0; }
+
+/* 「後台自己 ＋ 它 spawn 的所有子孫」的 PID 集合。比對 processMatch 時要排除，
+ * 否則自己開的工具會同時被判成「我開的」與「外部已在跑」。 */
+function managerSubtreePids(list) {
+  const childrenOf = new Map();
+  for (const proc of list) {
+    if (!proc || typeof proc.ProcessId !== 'number') continue;
+    const ppid = proc.ParentProcessId;
+    if (!childrenOf.has(ppid)) childrenOf.set(ppid, []);
+    childrenOf.get(ppid).push(proc.ProcessId);
+  }
+  const subtree = new Set();
+  const queue = [process.pid];
+  while (queue.length) {
+    const pid = queue.pop();
+    if (subtree.has(pid)) continue;
+    subtree.add(pid);
+    for (const c of childrenOf.get(pid) || []) queue.push(c);
+  }
+  return subtree;
+}
+
+async function findExternalPids(tool) {
+  if (!tool.processMatch) return [];
+  const needle = String(tool.processMatch).toLowerCase();
+  const list = await scanProcesses();
+  const exclude = managerSubtreePids(list);
+  const pids = [];
+  for (const proc of list) {
+    if (!proc || !proc.CommandLine) continue;
+    if (exclude.has(proc.ProcessId)) continue;
+    const cl = String(proc.CommandLine).toLowerCase();
+    if (cl.includes('win32_process')) continue;      /* 掃描指令本身 */
+    if (cl.includes(needle)) pids.push(proc.ProcessId);
+  }
+  return pids;
+}
+
+function probePort(port, timeoutMs = 600) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok) => { if (settled) return; settled = true; sock.destroy(); resolve(ok); };
+    const sock = net.connect({ host: '127.0.0.1', port });
+    sock.setTimeout(timeoutMs);
+    sock.once('connect', () => done(true));
+    sock.once('timeout', () => done(false));
+    sock.once('error', () => done(false));
+  });
+}
+
+async function buildToolStatus(tool) {
+  const st = getToolState(tool.id);
+  const managed = isManaged(st);
+  let portOpen = false;
+  let externalPids = [];
+  if (!managed) {
+    if (tool.port) portOpen = await probePort(tool.port);
+    if (tool.processMatch) externalPids = await findExternalPids(tool);
+  } else if (tool.port) {
+    portOpen = await probePort(tool.port);
+  }
+
+  let status;              /* running | starting | stopped */
+  let external = false;
+  if (managed) {
+    if (tool.port) {
+      /* port 一直沒開也還是 running（程序活著），避免永遠卡在「啟動中」 */
+      status = portOpen ? 'running' : (Date.now() - st.startedAt < STARTING_GRACE_MS ? 'starting' : 'running');
+    } else {
+      status = 'running';
+    }
+  } else if (portOpen || externalPids.length > 0) {
+    status = 'running';
+    external = true;       /* 不是這個面板開的（例如他自己雙擊了 start.bat） */
+  } else {
+    status = 'stopped';
+  }
+
+  return {
+    id: tool.id,
+    name: tool.name,
+    emoji: tool.emoji || '🔧',
+    description: tool.description || '',
+    category: tool.category || '其他',
+    port: tool.port || null,
+    url: tool.url || null,
+    status, external, managed,
+    pid: managed ? st.pid : (externalPids[0] || null),
+    /* processMatch 比對到的有 PID，可以在這裡停；只靠 port 探到的拿不到 PID，停不了 */
+    stoppable: managed || externalPids.length > 0,
+    logLines: st.logs.length,
+  };
+}
+
+/* 後台關掉時，把自己 spawn 的工具一起收乾淨，不留孤兒 */
+let toolsCleaned = false;
+function cleanupTools() {
+  if (toolsCleaned) return;
+  toolsCleaned = true;
+  for (const [, st] of toolState) {
+    if (st.child && st.child.pid) { try { killTree(st.child.pid); } catch (_) {} }
+  }
+}
+process.on('exit', cleanupTools);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => { cleanupTools(); process.exit(0); });
+}
+
 /* ------------------------------------------------------------------ */
 /* API                                                                 */
 /* ------------------------------------------------------------------ */
+
+/* ⚠️ 加了「能啟動任意本機程序」之後，光綁 127.0.0.1 還不夠：
+ * 任何網頁都可以對 http://127.0.0.1:4620 送一個跨來源 POST（simple request 不觸發預檢，
+ * 回應讀不到但**副作用會發生**）。所以：
+ *   ① Host 一定要是 localhost／127.0.0.1（擋 DNS rebinding）；
+ *   ② 有 Origin 的話一定要是我們自己這一頁（瀏覽器跨來源 POST 必帶 Origin）。
+ * 沒有 Origin 的（curl／測試工具／本機腳本）放行——那已經是「這台電腦上的程式」，
+ * 它本來就有完整權限，擋它沒有意義。 */
+function hostOk(req) {
+  const h = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+  return h === '' || h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1';
+}
+function originOk(req) {
+  const o = req.headers.origin;
+  if (!o) return true;
+  return o === 'http://localhost:' + PORT || o === 'http://127.0.0.1:' + PORT;
+}
+
 async function handleApi(req, res, url) {
   const p = url.pathname.replace(/^\/api/, '');
   const m = req.method;
+
+  if (!hostOk(req)) return sendJson(res, 403, { ok: false, message: '這個後台只接受本機連線' });
+  if (m !== 'GET' && !originOk(req)) {
+    return sendJson(res, 403, { ok: false, message: '這個要求不是從鑰匙圈後台送來的，擋掉了' });
+  }
 
   if (p === '/state' && m === 'GET') return sendJson(res, 200, { ok: true, state: viewState() });
 
@@ -882,6 +1163,72 @@ async function handleApi(req, res, url) {
     } catch (e) {
       return sendJson(res, 200, { ok: true, entries: [],
         message: '讀不到變更紀錄（這個資料夾還沒接上 git？）：' + firstLine(e && e.message) });
+    }
+  }
+
+  /* ---- 🧰 工具（本機程式的啟動／停止） ----
+   * ⚠️ 放在 beforeChange() **之前**是刻意的：啟動一個本機工具跟鑰匙圈的資料
+   *    一點關係都沒有，不該為了按一下「啟動」就去跟 GitHub 對一次時間戳。 */
+  if (p === '/tools' && m === 'GET') {
+    const tools = readTools();
+    const list = await Promise.all(tools.map(buildToolStatus));
+    return sendJson(res, 200, { ok: true, tools: list, file: toolsState });
+  }
+  const tm = p.match(/^\/tools\/([^/]+)\/(start|stop|restart|logs)$/);
+  if (tm) {
+    const id = decodeURIComponent(tm[1]);
+    const action = tm[2];
+    const tool = findTool(id);
+    if (!tool) return sendJson(res, 404, { ok: false, message: '找不到這個工具：' + id });
+
+    if (action === 'logs' && m === 'GET') {
+      return sendJson(res, 200, { ok: true, id, logs: getToolState(id).logs });
+    }
+    if (m !== 'POST') return sendJson(res, 405, { ok: false, message: '這支只收 POST' });
+
+    if (action === 'start') {
+      /* port 已經被外部占著就擋下來，不要開第二份去撞 port */
+      if (tool.port && !isManaged(getToolState(id)) && (await probePort(tool.port))) {
+        return sendJson(res, 409, { ok: false,
+          message: 'port ' + tool.port + ' 已經有東西在用（外部啟動中），先把那個視窗關掉' });
+      }
+      if (!isManaged(getToolState(id)) && tool.processMatch) {
+        const pids = await findExternalPids(tool);
+        if (pids.length > 0) {
+          return sendJson(res, 409, { ok: false,
+            message: '已經有外部程序在跑了（pid ' + pids.join('、') + '），先停掉它' });
+        }
+      }
+      const r = startTool(tool);
+      invalidateProcCache();
+      return sendJson(res, r.ok ? 200 : 500, r);
+    }
+    if (action === 'stop') {
+      const st = getToolState(id);
+      if (isManaged(st)) {
+        const r = stopTool(tool);
+        invalidateProcCache();
+        return sendJson(res, 200, r);
+      }
+      /* 外部啟動但有 processMatch → 找得到 PID，一樣 taskkill 整棵樹 */
+      if (tool.processMatch) {
+        const pids = await findExternalPids(tool);
+        if (pids.length > 0) {
+          for (const pid of pids) killTree(pid);
+          invalidateProcCache();
+          pushToolLog(st, '停止外部程序（taskkill /pid ' + pids.join('、') + ' /t /f）', '⚙');
+          return sendJson(res, 200, { ok: true, pids });
+        }
+      }
+      return sendJson(res, 200, { ok: false,
+        message: '不是這個面板開的，這裡停不了（去原本開它的視窗關）' });
+    }
+    if (action === 'restart') {
+      const st = getToolState(id);
+      if (isManaged(st)) stopTool(tool);
+      setTimeout(() => startTool(tool), 1200);
+      invalidateProcCache();
+      return sendJson(res, 200, { ok: true, message: '重啟排好了' });
     }
   }
 
