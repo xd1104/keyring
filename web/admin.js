@@ -39,7 +39,14 @@ var ST = {
   vaultIter: ITER,
   P: null,            /* 解開的真本 */
   baseSha: "",        /* 載入當下 GitHub 上的 commit，存檔時用來擋「別的裝置剛改過」 */
-  tab: "users",
+  tab: "apps",         /* 進來先看到 App：管理主控台的主場（2026-08-28） */
+  who: "",           /* 這台裝置是誰在用（只寫進 commit message 的 by:，不進任何公開檔） */
+  log: null,          /* 近況（變更紀錄），第一次切過去才抓 */
+  logBusy: false,
+  pushed: {},         /* repo -> pushed_at（未認證的 GitHub API，30 分鐘快取） */
+  pushedAt: 0,
+  openLog: {},        /* 哪幾張 App 卡片被展開了 */
+  appLog: {},         /* appId -> 最近 3 筆 commit */
   busy: false,
   status: { kind: "ok", title: "已經是最新的", detail: "" }
 };
@@ -211,6 +218,97 @@ function buildKeyring(p, stamp) {
   });
 }
 
+/* 啟動頁的公開清單 apps.json。
+ * ⚠️ **產生器只有一份**：client/keyring-fields.js 的 buildApps()，電腦端呼叫的是同一支。
+ *    這個 repo 已經因為「同一條規則活在兩套實作裡」出過事（金鑰沿用只修了電腦端），
+ *    所以這裡刻意只是一層薄薄的轉呼叫 —— 不要在這裡「順手」加欄位或改順序。
+ *    tools/check-public.js 的 E 組會比對兩端產出**逐位元組相同**。 */
+function appsFileText(p, stamp) {
+  return KF.appsJsonText({ apps: (p && p.apps) || [], generatedAt: stamp });
+}
+
+/* ------------------------------------------------------------------ */
+/* 金鑰到期偵測（手機端）                                               */
+/* ------------------------------------------------------------------ */
+/* ⛔ 鐵律：拿**那個 App 自己的那把 token**打**它自己的 repo**。
+ *    不可以拿鑰匙圈那把（ghToken()）去測別的 App —— 那等於讓金鑰跨 App 流動。
+ * ⛔ 明文只在這台裝置的記憶體裡用一次：不寫進 localStorage、不進 apps.json、不進畫面。 */
+function checkAppKey(a) {
+  var token = String((a && a.token) || "").trim();
+  if (!token) return Promise.resolve({ changed: false, message: "這個 App 沒有金鑰，沒有東西可以測" });
+  if (!KF.looksLikeGithubToken(token)) {
+    return Promise.resolve({ changed: false, message: "這個 App 的金鑰不是 GitHub 金鑰，測不到到期日（可以自己填一個）" });
+  }
+  var repo = KF.normRepo(a.repo) || KF.repoFromUrl(a.url || "");
+  var was = JSON.stringify(KF.normKeyExp(a.keyExp));
+  var now = nowIso();
+  return fetch("https://api.github.com/" + (repo ? "repos/" + repo : "user"), {
+    headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json" }
+  }).then(function (r) {
+    var exp = KF.expiryFromHeader(r.headers.get("github-authentication-token-expiration") || "");
+    var prev = KF.normKeyExp(a.keyExp);
+    var msg;
+    if (r.ok) {
+      a.keyExp = exp
+        ? { expiresAt: exp, source: "auto", checkedAt: now, state: "ok" }
+        : { expiresAt: null, source: "auto", checkedAt: now, state: "none" };
+      msg = exp ? ("這把到 " + exp + " 過期") : "這把不會過期";
+    } else if (r.status === 401) {
+      a.keyExp = { expiresAt: (prev && prev.expiresAt) || null, source: "auto", checkedAt: now, state: "expired" };
+      msg = "GitHub 說這把已經無效了（過期或被撤銷）";
+    } else {
+      /* 403／404：**測不到，不是沒事**。手動填過的值不覆蓋。 */
+      a.keyExp = prev ? { expiresAt: prev.expiresAt, source: prev.source, checkedAt: now, state: prev.state }
+                      : { expiresAt: null, source: "auto", checkedAt: now, state: "unknown" };
+      msg = "這次測不到（GitHub 回 " + r.status + "），維持上一次的結果";
+    }
+    return { changed: JSON.stringify(KF.normKeyExp(a.keyExp)) !== was, message: msg };
+  }, function () {
+    return { changed: false, message: "連不到 GitHub，這次沒測到" };
+  });
+}
+
+/* 各 App 的「上次更新時間」：一個未認證的請求就拿得到全部（60 次/小時/IP）。
+ * 跟啟動頁共用同一份 localStorage 快取（同一個鍵、同樣 30 分鐘）。 */
+var PUSH_KEY = "keyring.launch.pushed";
+var PUSH_TTL = 30 * 60 * 1000;
+function loadPushed(force) {
+  var cache = null;
+  try { cache = JSON.parse(localStorage.getItem(PUSH_KEY) || "null"); } catch (e) { cache = null; }
+  if (!force && cache && cache.at && (Date.now() - cache.at) < PUSH_TTL) {
+    ST.pushed = cache.map || {}; ST.pushedAt = cache.at;
+    return Promise.resolve(false);
+  }
+  return fetch("https://api.github.com/users/" + CFG.owner + "/repos?sort=pushed&per_page=100", {
+    headers: { "Accept": "application/vnd.github+json" }
+  }).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }).then(function (list) {
+    var map = {};
+    (list || []).forEach(function (x) { if (x && x.full_name) map[x.full_name] = x.pushed_at; });
+    ST.pushed = map; ST.pushedAt = Date.now();
+    try { localStorage.setItem(PUSH_KEY, JSON.stringify({ at: ST.pushedAt, map: map })); } catch (e) {}
+    return true;
+  }, function () {
+    /* 拿不到更新時間不是錯誤：卡片照常，那一行顯示「—」 */
+    if (cache) { ST.pushed = cache.map || {}; ST.pushedAt = cache.at; }
+    return false;
+  });
+}
+function agoOf(iso) {
+  var t = Date.parse(iso || "");
+  if (isNaN(t)) return "—";
+  var d = Date.now() - t, H = 3600e3, D = 86400e3;
+  if (d < 90e3) return "剛剛";
+  if (d < H) return Math.max(1, Math.round(d / 60e3)) + " 分鐘前";
+  if (d < 22 * H) return Math.round(d / H) + " 小時前";
+  if (d < 44 * H) return "昨天";
+  if (d < 8 * D) return Math.round(d / D) + " 天前";
+  var x = new Date(t);
+  return (x.getMonth() + 1) + "/" + x.getDate();
+}
+
 /* ------------------------------------------------------------------ */
 /* GitHub API                                                          */
 /* ------------------------------------------------------------------ */
@@ -272,7 +370,7 @@ function pushFiles(files, message) {
 /* ------------------------------------------------------------------ */
 /* 存檔（跟本機後台一樣：改了就直接發布，沒有草稿狀態）                    */
 /* ------------------------------------------------------------------ */
-function save(what) {
+function save(what, diffs) {
   if (ST.busy) return Promise.reject(new Error("上一筆還在存，等一下下"));
   if (!ghToken()) { askGithubToken(); return Promise.reject(new Error("先給一把 GitHub 金鑰")); }
   ST.busy = true;
@@ -297,10 +395,14 @@ function save(what) {
         kdf: { algo: "PBKDF2-SHA256", iter: ST.vaultIter, salt: ST.vaultSalt },
         iv: e.iv, cipher: e.cipher
       };
+      /* 三個檔案包成同一個 commit。apps.json 是啟動頁在讀的公開清單，
+       * 產不出來（名字／圖示裡被貼了金鑰）就**整筆存檔失敗**，不要靜靜跳過它 ——
+       * 靜靜跳過的話啟動頁會停在舊清單，而他以為存好了。 */
       return pushFiles([
         { path: "keyring.json", text: JSON.stringify(keyring, null, 2) + "\n" },
-        { path: "vault.json", text: JSON.stringify(vault, null, 2) + "\n" }
-      ], "keyring: 手機後台更新 " + stamp);
+        { path: "vault.json", text: JSON.stringify(vault, null, 2) + "\n" },
+        { path: "apps.json", text: appsFileText(ST.P, stamp) }
+      ], KF.commitMessage({ action: what, diffs: diffs, by: ST.who, via: "手機後台" }));
     });
   }).then(function (sha) {
     ST.baseSha = sha;
@@ -403,10 +505,47 @@ function doUnlock() {
     render();
     /* Pages 有 CDN 快取，剛剛那份可能是幾分鐘前的 —— 有金鑰就立刻換成 API 上的最新版 */
     if (ghToken()) reloadFromGithub().catch(function (e) { toast(String(e.message || e), true); });
+    afterUnlock();
   }).catch(function (e) {
     ST.keyBytes = null;
     lockErr = String((e && e.message) || e);
     renderLock();
+  });
+}
+
+/* 解鎖之後：① 啟動頁帶進來的深連結直接端出那張 sheet；
+ *           ② 還沒寫過「這台是誰在用」就問一次（只問一次，按「先不要」也算問過）；
+ *           ③ 背景把每把金鑰的到期日重測一輪（規格 4-2 的②），有變才存。 */
+function afterUnlock() {
+  var dl = ST.deepLink;
+  ST.deepLink = null;
+  if (dl) {
+    var a = appById(dl.app);
+    if (a) {
+      ST.tab = "apps"; render();
+      if (dl.do === "key") return appTokenSheet(a);
+      return appMenu(a);
+    }
+    toast("找不到那個 App，可能已經改名或拿掉了", true);
+  }
+  var asked = "";
+  try { asked = localStorage.getItem(NS + "whoAsked") || ""; } catch (e) { asked = ""; }
+  if (!ST.who && !asked) return whoSheet(false);
+  backgroundCheckKeys();
+}
+/* 背景重測：安靜地做，結果變了才存一筆（不彈任何東西打斷他） */
+function backgroundCheckKeys() {
+  var apps = (ST.P.apps || []).filter(function (a) { return a.token && KF.looksLikeGithubToken(a.token); });
+  if (!apps.length) return;
+  var changed = false, chain = Promise.resolve();
+  apps.forEach(function (a) {
+    chain = chain.then(function () {
+      return checkAppKey(a).then(function (r) { changed = changed || r.changed; });
+    });
+  });
+  chain.then(function () {
+    if (!changed) return render();
+    save("重新檢查了金鑰的到期日").catch(function () { /* 存不出去就算了，下次再測 */ });
   });
 }
 
@@ -428,11 +567,13 @@ function render() {
       '<button id="bt-set" title="設定">⚙︎</button></div>' +
     statusBarHtml() +
     '<div class="ad-tabs">' +
-      '<button data-tab="users" class="' + (ST.tab === "users" ? "on" : "") + '">成員</button>' +
       '<button data-tab="apps" class="' + (ST.tab === "apps" ? "on" : "") + '">App</button>' +
+      '<button data-tab="users" class="' + (ST.tab === "users" ? "on" : "") + '">成員</button>' +
+      '<button data-tab="log" class="' + (ST.tab === "log" ? "on" : "") + '">近況</button>' +
     '</div>' +
-    (ST.tab === "users" ? usersHtml() : appsHtml()) +
+    (ST.tab === "users" ? usersHtml() : ST.tab === "log" ? logHtml() : appsHtml()) +
     '<p class="ad-foot">改了就直接存到 GitHub，沒有草稿狀態。<br>' +
+      '這台裝置記錄成「' + esc(ST.who || "沒寫名字") + '」（近況那頁的「誰改的」）<br>' +
       '最後更新 ' + esc(fmtTime(ST.P.updatedAt) || "—") + '</p>';
 
   $("bt-reload").onclick = function () {
@@ -452,6 +593,22 @@ function render() {
   });
   if ($("add-user")) $("add-user").onclick = function () { userSheet(null); };
   if ($("add-app")) $("add-app").onclick = function () { appSheet(null); };
+  /* 卡片展開「最近改了什麼」：**只在展開的時候才打那一個請求** */
+  Array.prototype.forEach.call(el.querySelectorAll("[data-log]"), function (b) {
+    b.onclick = function () {
+      var id = b.getAttribute("data-log");
+      ST.openLog[id] = !ST.openLog[id];
+      render();
+      if (ST.openLog[id] && !ST.appLog[id]) loadAppLog(id);
+    };
+  });
+  if ($("bt-more")) $("bt-more").onclick = function () { loadLog((ST.log || []).length + 30); };
+  if ($("bt-checkall")) $("bt-checkall").onclick = function () { checkAllKeys($("bt-checkall")); };
+  /* 更新時間：畫面先出來，這個晚一點到（拿不到也不影響清單） */
+  if (ST.tab === "apps" && !ST.pushedAt) {
+    loadPushed(false).then(function (fresh) { if (fresh || ST.pushedAt) render(); });
+  }
+  if (ST.tab === "log" && !ST.log && !ST.logBusy) loadLog(30);
   if ($("bt-retry")) $("bt-retry").onclick = function () {
     reloadFromGithub().then(function () { toast("已經是最新的"); },
       function (e) { toast(String(e.message || e), true); });
@@ -488,27 +645,165 @@ function usersHtml() {
   }).join("") + '<button class="addcard" id="add-user">＋ 加一個人</button>';
 }
 
+/* 啟動頁的磚塊順序是固定的（Benson 拍板），後台也照同一個順序列，
+ * 免得他在後台看到的排法跟啟動頁不一樣。規則跟 KF.buildApps() 一致。 */
+function appsInOrder() {
+  return ST.P.apps.map(function (a, i) {
+    return { a: a, i: i, o: (typeof a.order === "number" && isFinite(a.order)) ? a.order : i };
+  }).sort(function (x, y) { return x.o === y.o ? x.i - y.i : x.o - y.o; }).map(function (r) { return r.a; });
+}
+/* 到期 chip。文案在 KF.keyLabel()（啟動頁、兩個後台同一份） */
+function keyChipHtml(a) {
+  if (!a.token) return '<span class="chip none">只有連結</span>';
+  var st = KF.keyExpState(a.keyExp, nowIso());
+  var cls = st.state === "expired" ? "bad" : (st.state === "soon" ? "warn" : (st.state === "unknown" ? "none" : "ok"));
+  return '<span class="chip ' + cls + '">' + esc(KF.keyLabel(st)) + '</span>';
+}
 function appsHtml() {
   if (!ST.P.apps.length) {
     return '<div class="empty"><div class="big">📦</div>' +
       '<p>還沒有登記任何 App。<br>登記的代號要跟那個 App 前端的 appId 一模一樣。</p></div>' +
       '<button class="addcard" id="add-app">＋ 登記一個 App</button>';
   }
-  return ST.P.apps.map(function (a) {
+  return appsInOrder().map(function (a) {
     var who = ST.P.users.filter(function (u) { return (u.apps || []).indexOf(a.id) >= 0; });
     var chips = who.map(function (u) { return '<span class="chip">' + esc(u.emoji + " " + u.name) + '</span>'; }).join("");
-    return '<div class="rowcard">' +
+    var repo = KF.normRepo(a.repo) || KF.repoFromUrl(a.url || "");
+    var open = !!ST.openLog[a.id];
+    var rows = ST.appLog[a.id];
+    return '<div class="rowcard stack"><div class="rc-top">' +
       '<div class="rc-face" style="background:#efe8db; color:#6b6154">' + esc(a.emoji || "📦") + '</div>' +
       '<div class="rc-bd"><b>' + esc(a.name) + '</b>' +
-        '<div class="chips">' + (chips || '<span class="chip none">還沒給任何人</span>') + '</div>' +
-        (a.public ? '<div class="keyline" style="color:#8a5b12">🌐 公開（明文放在公開 repo）</div>' : '') +
+        (a.url ? '<span class="rc-url">' + esc(String(a.url).replace(/^https?:\/\//, "")) + '</span>'
+               : '<span class="rc-url miss">⚠ 還沒填網址，啟動頁點不開</span>') +
+        '<div class="chips">' + keyChipHtml(a) +
+          '<span class="chip">' + (repo ? "更新於 " + esc(agoOf(ST.pushed[repo])) : "沒有 repo") + '</span>' +
+          (a.public ? '<span class="chip warn">公開模式</span>' : "") +
+          (chips || '<span class="chip none">還沒給任何人</span>') +
+        '</div>' +
         (KF.normSplash(a.splash) ? '<div class="keyline">🎬 ' + esc(splashSummary(KF.normSplash(a.splash))) + '</div>' : '') +
         '<div class="keyline">' + esc(a.id) + ' · ' +
           esc(a.token ? KF.maskSummary(a.fields, a.token, maskToken) : "沒有金鑰") + '</div>' +
       '</div>' +
       '<button class="rc-more" data-app="' + esc(a.id) + '">⋯</button>' +
+      '</div>' +
+      (repo
+        ? '<button class="rc-open" data-log="' + esc(a.id) + '">' + (open ? "收起 ▴" : "最近改了什麼 ▾") + '</button>' +
+          (open ? '<div class="rc-log">' + (rows
+            ? (rows.length ? '<ul>' + rows.map(function (r) {
+                return '<li><i>' + esc(agoOf(r.at)) + '</i>' + esc(r.title) + '</li>';
+              }).join("") + '</ul>' : '<p>這個 repo 還沒有 commit。</p>')
+            : '<p>抓取中…</p>') + '</div>' : "")
+        : "") +
     '</div>';
-  }).join("") + '<button class="addcard" id="add-app">＋ 登記一個 App</button>';
+  }).join("") +
+    '<button class="addcard" id="add-app">＋ 登記一個 App</button>' +
+    '<button class="loadmore" id="bt-checkall">🔄 重新檢查全部金鑰的到期日</button>';
+}
+
+/* ------------------------------------------------------------------ */
+/* 近況（變更紀錄）                                                     */
+/* ------------------------------------------------------------------ */
+/* 手機端的資料來源是 GitHub 的 commits API（帶既有的鑰匙圈 PAT），
+ * 電腦端是 git log —— 兩邊都**只解析 message**，畫面組法完全一樣。 */
+function loadLog(n) {
+  ST.logBusy = true;
+  return gh("/commits?path=keyring.json&per_page=" + Math.min(100, n || 30)).then(function (list) {
+    ST.log = (list || []).map(function (c) {
+      var p = KF.parseCommitMessage((c.commit && c.commit.message) || "");
+      return { sha: (c.sha || "").slice(0, 7), at: (c.commit && c.commit.author && c.commit.author.date) || "",
+        title: p.title, by: p.by, via: p.via, tagged: p.tagged, otherFiles: null };
+    });
+    ST.logBusy = false;
+    render();
+  }, function (e) {
+    ST.logBusy = false;
+    ST.log = [];
+    ST.logErr = String((e && e.message) || e);
+    render();
+  });
+}
+function loadAppLog(id) {
+  var a = appById(id);
+  var repo = a && (KF.normRepo(a.repo) || KF.repoFromUrl(a.url || ""));
+  if (!repo) { ST.appLog[id] = []; return render(); }
+  /* 未認證就好：這是公開資料，不必把鑰匙圈那把 PAT 送去別人的 repo */
+  return fetch("https://api.github.com/repos/" + repo + "/commits?per_page=3", {
+    headers: { "Accept": "application/vnd.github+json" }
+  }).then(function (r) {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }).then(function (list) {
+    ST.appLog[id] = (list || []).map(function (c) {
+      return { at: (c.commit && c.commit.author && c.commit.author.date) || "",
+        title: String((c.commit && c.commit.message) || "").split("\n")[0] };
+    });
+    render();
+  }, function () {
+    ST.appLog[id] = [];
+    render();
+  });
+}
+function dayLabel(iso) {
+  var t = Date.parse(iso || "");
+  if (isNaN(t)) return "不知道什麼時候";
+  var a = new Date(t), now = new Date();
+  if (a.toDateString() === now.toDateString()) return "今天";
+  if (a.toDateString() === new Date(now.getTime() - 86400e3).toDateString()) return "昨天";
+  return (a.getMonth() + 1) + " 月 " + a.getDate() + " 日";
+}
+function clockOf(iso) {
+  var t = Date.parse(iso || "");
+  if (isNaN(t)) return "";
+  var d = new Date(t);
+  return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+}
+/* 兩個後台共用這一支的結構（電腦端是同樣的 markup），資料形狀一樣：
+ * {at, title, by, via, tagged, otherFiles} */
+function logRowsHtml(rows, me) {
+  var h = "", last = "";
+  rows.forEach(function (e) {
+    var d = dayLabel(e.at);
+    if (d !== last) { h += (last ? "</ul>" : "") + '<p class="day">' + esc(d) + '</p><ul class="tl">'; last = d; }
+    var who = e.by ? esc(e.by) + "（" + esc(e.via) + "）" : esc(e.via);
+    h += '<li class="' + (me && e.by === me ? "me" : "") + '">' +
+      '<div class="w"><b>' + who + '</b><span>' + esc(clockOf(e.at)) + '</span></div>' +
+      '<div class="t">' + esc(e.title) + '</div>' +
+      (e.otherFiles ? '<div class="x">這次同時改到 ' + e.otherFiles + ' 個其他檔案</div>' : "") +
+      '</li>';
+  });
+  return h + (last ? "</ul>" : "");
+}
+function logHtml() {
+  if (ST.logBusy && !ST.log) return '<div class="empty"><div class="big">🕘</div><p>正在跟 GitHub 要紀錄…</p></div>';
+  if (!ST.log || !ST.log.length) {
+    return '<div class="empty"><div class="big">🕘</div><p>' +
+      esc(ST.logErr || "還沒有任何變更紀錄。") + '</p></div>';
+  }
+  return '<p class="ad-foot" style="text-align:left; padding:0 4px 10px">鑰匙圈被誰改過。存檔就是一筆紀錄，改不掉也刪不掉。</p>' +
+    logRowsHtml(ST.log, ST.who) +
+    '<button class="loadmore" id="bt-more">看更早的</button>';
+}
+/* 「重新檢查全部」：一個 App 一個請求、各用各的 token */
+function checkAllKeys(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "檢查中…"; }
+  var apps = ST.P.apps.filter(function (a) { return !!a.token; });
+  var changed = false, lines = [];
+  var chain = Promise.resolve();
+  apps.forEach(function (a) {
+    chain = chain.then(function () {
+      return checkAppKey(a).then(function (r) {
+        changed = changed || r.changed;
+        lines.push(a.name + "：" + r.message);
+      });
+    });
+  });
+  return chain.then(function () {
+    if (btn) { btn.disabled = false; btn.textContent = "🔄 重新檢查全部金鑰的到期日"; }
+    if (!changed) { render(); return toast("檢查完了，結果沒有變"); }
+    /* 結果變了才存 —— 否則每按一次就多一筆什麼都沒改的紀錄 */
+    save("重新檢查了所有金鑰的到期日").catch(function (e) { toast(String(e.message || e), true); });
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -539,7 +834,9 @@ function runSave(btn, what, mutate) {
     return toast(String(e.message || e), true);
   }
   closeSheet();
-  save(what).catch(function (e) {
+  /* 結構差異是備援：what 沒給人話時，commit 的第一行才用它推 */
+  var diffs = KF.summarizeChange(JSON.parse(undo), ST.P);
+  save(what, diffs).catch(function (e) {
     ST.P = JSON.parse(undo);   // 沒存出去就退回原狀，畫面不要騙人
     render();
     toast(String(e.message || e), true);
@@ -717,6 +1014,8 @@ function appMenu(a) {
     '<div class="menu-list">' +
       '<button id="m-edit">✏️ 改名字與樣子</button>' +
       '<button id="m-token">🔑 換一把金鑰</button>' +
+      '<button id="m-exp">⏰ 金鑰到期日</button>' +
+      '<button id="m-order">↕️ 在啟動頁的位置</button>' +
       '<button id="m-fields">🧩 金鑰欄位（分成幾格）</button>' +
       '<button id="m-splash">🎬 開場外觀（啟動畫面）</button>' +
       '<button id="m-public">🌐 公開模式' + (a.public ? '（目前：公開）' : '（目前：要密碼）') + '</button>' +
@@ -726,6 +1025,8 @@ function appMenu(a) {
     function () {
       $("m-edit").onclick = function () { appSheet(a); };
       $("m-token").onclick = function () { appTokenSheet(a); };
+      $("m-exp").onclick = function () { appKeySheet(a); };
+      $("m-order").onclick = function () { appOrderSheet(a); };
       $("m-fields").onclick = function () { appFieldsSheet(a); };
       $("m-splash").onclick = function () { appSplashSheet(a); };
       $("m-public").onclick = function () { appPublicSheet(a); };
@@ -996,7 +1297,10 @@ function appFieldsSheet(a) {
 }
 
 function appSheet(a) {
-  var f = { emoji: a ? a.emoji : "📦", fields: a ? KF.normFields(a.fields) : [], appId: a ? a.id : "" };
+  var f = { emoji: a ? a.emoji : "📦", fields: a ? KF.normFields(a.fields) : [], appId: a ? a.id : "",
+    /* 登記時先問「要不要金鑰」：只放連結的 App 不產密文、不出現在解鎖名單裡。
+     * 不另外存一個 linkOnly 旗標 —— keyed 從 token 是不是空的推導就好（少一個會分岔的真相來源）。 */
+    kind: a ? (a.token ? "key" : "link") : "link" };
   var donor = null;
   for (var i = ST.P.apps.length - 1; i >= 0; i--) if (ST.P.apps[i].token) { donor = ST.P.apps[i]; break; }
   function redraw() { f.appId = $("f-id") ? $("f-id").value.trim() : f.appId; appSheetDraw(a, f, donor); }
@@ -1011,11 +1315,24 @@ function appSheetDraw(a, f, donor) {
        : '<label class="field"><span class="fl">代號</span>' +
          '<input id="f-id" type="text" inputmode="latin" autocapitalize="off" placeholder="travel-book">' +
          '<span class="hint">要跟那個 App 前端 <code>Keyring.init({appId:…})</code> 寫的一模一樣，只能用英數與 - _ 。</span></label>') +
-    '<label class="field"><span class="fl">網址（選填）</span>' +
-      '<input id="f-url" type="url" inputmode="url" value="' + esc(a ? (a.url || "") : "") + '" placeholder="https://…"></label>' +
+    (a ? "" :
+      '<div class="kind" id="f-kind">' +
+        '<button type="button" data-k="link" class="' + (f.kind === "link" ? "on" : "") + '">' +
+          '<span class="ke">🔗</span><span><b>只放連結</b>' +
+          '<span>只是想在啟動頁按一下就開它。不會出現在解鎖名單裡。</span></span></button>' +
+        '<button type="button" data-k="key" class="' + (f.kind === "key" ? "on" : "") + '">' +
+          '<span class="ke">🔑</span><span><b>連結＋金鑰</b>' +
+          '<span>這個 App 要存東西回 GitHub。登記完再貼金鑰也可以。</span></span></button>' +
+      '</div>') +
+    '<label class="field"><span class="fl">網址（' + (a ? "選填" : "啟動頁的磚塊就是靠它開 App") + '）</span>' +
+      '<input id="f-url" type="url" inputmode="url" value="' + esc(a ? (a.url || "") : "") + '" placeholder="https://xd1104.github.io/…"></label>' +
+    '<label class="field"><span class="fl">GitHub repo（選填）</span>' +
+      '<input id="f-repo" type="text" inputmode="latin" autocapitalize="off" spellcheck="false" value="' +
+      esc(a ? (KF.normRepo(a.repo) || "") : "") + '" placeholder="xd1104/travel-book">' +
+      '<span class="hint">拿來顯示「上次更新時間」。留空就從網址猜（猜不到就顯示「—」，不會亂猜）。</span></label>' +
     '<div class="field"><span class="fl">圖示</span>' + picksHtml("f-emoji", APP_EMOJIS, f.emoji) + '</div>' +
     (a ? "" : fieldsEditorHtml(f.fields, f.appId)) +
-    (a || f.fields.length ? "" :
+    (a || f.fields.length || f.kind === "link" ? "" :
       '<label class="field"><span class="fl">金鑰（選填）</span>' +
       '<textarea id="f-token" autocapitalize="off" autocomplete="off" placeholder="留空＝之後再填"></textarea>' +
       /* ⛔ 這裡以前寫「留空就沿用○○○那一把」，而且真的會抄過來。那等於讓金鑰在
@@ -1028,6 +1345,15 @@ function appSheetDraw(a, f, donor) {
     actsHtml(),
     function () {
       wirePicks("f-emoji", function (v) { f.emoji = v; });
+      if ($("f-kind")) {
+        Array.prototype.forEach.call($("f-kind").querySelectorAll("button"), function (b) {
+          b.onclick = function () {
+            f.kind = b.getAttribute("data-k");
+            f.appId = $("f-id") ? $("f-id").value.trim() : f.appId;
+            appSheetDraw(a, f, donor);
+          };
+        });
+      }
       if (!a) wireFieldsEditor(f, function () {
         f.emoji = f.emoji; appSheetDraw(a, f, donor);
       });
@@ -1035,9 +1361,17 @@ function appSheetDraw(a, f, donor) {
         var name = $("f-name").value.trim();
         if (!name) return toast("先給它一個名字", true);
         var url = $("f-url").value.trim();
+        var repo = $("f-repo") ? KF.normRepo($("f-repo").value) : "";
+        if ($("f-repo") && $("f-repo").value.trim() && !repo) {
+          return toast("GitHub repo 要寫成 xd1104/travel-book 這種樣子", true);
+        }
+        /* 名字／網址／repo 會原樣進**公開的** apps.json（啟動頁在讀），先擋一次 */
+        var whyPub = KF.appsBlockReason([{ id: (a && a.id) || name, name: name, emoji: f.emoji, url: url, repo: repo }]);
+        if (whyPub) return toast(whyPub, true);
         if (a) {
           return runSave(btn, "改了 " + name, function () {
             a.name = name; a.emoji = f.emoji; a.url = url;
+            if (repo) a.repo = repo; else delete a.repo;
           });
         }
         var wanted = slugify($("f-id").value || name);
@@ -1050,34 +1384,131 @@ function appSheetDraw(a, f, donor) {
         /* 沒填就是「還沒有金鑰」——**不從別的 App 沿用**（見上面的說明），
          * 也不擋：分格的 App 正常流程本來就是登記完再一格一格填。 */
         var token = $("f-token") ? $("f-token").value.trim() : "";
-        runSave(btn, "登記了 " + name, function () {
+        runSave(btn, "登記了 App「" + name + "」", function () {
           var id = uniqueId(wanted || newId("app"), ST.P.apps.map(function (x) { return x.id; }));
-          ST.P.apps.push({ id: id, name: name, emoji: f.emoji, url: url, token: token, fields: fields });
-          /* 新 App 直接給所有現有成員，要收再到「誰可以用」取消 */
-          ST.P.users.forEach(function (u) {
-            if (!Array.isArray(u.apps)) u.apps = [];
-            if (u.apps.indexOf(id) < 0) u.apps.push(id);
-          });
+          var made = { id: id, name: name, emoji: f.emoji, url: url, token: token, fields: fields };
+          if (repo) made.repo = repo;
+          made.order = ST.P.apps.length;      /* 新的排在最後面，位置固定不會跳 */
+          ST.P.apps.push(made);
+          /* 新 App 直接給所有現有成員，要收再到「誰可以用」取消。
+           * ⚠️ 只放連結的 App 例外：它沒有金鑰可以解，掛在成員底下只是雜訊。 */
+          if (f.kind === "key" || token || fields.length) {
+            ST.P.users.forEach(function (u) {
+              if (!Array.isArray(u.apps)) u.apps = [];
+              if (u.apps.indexOf(id) < 0) u.apps.push(id);
+            });
+          }
         });
       });
+    });
+}
+
+/* 金鑰到期日：自動測為主、手動填為輔 */
+function appKeySheet(a) {
+  var st = KF.keyExpState(a.keyExp, nowIso());
+  var repo = KF.normRepo(a.repo) || KF.repoFromUrl(a.url || "");
+  var box = "";
+  if (st.state === "expired") {
+    box = '<div class="expbox"><b>這把已經過期了</b>它現在存不了東西，而且不會跳錯誤——' +
+      'App 看起來一切正常，資料就是沒進去。</div>';
+  } else if (st.state === "soon") {
+    box = '<div class="expbox"><b>還有 ' + st.days + ' 天</b>到期日是 GitHub 自己回報的，不是我填的。</div>';
+  }
+  openSheet("「" + a.name + "」的金鑰到期日",
+    box +
+    '<p class="note">現在：<b>' + esc(KF.keyLabel(st)) + '</b>' +
+      (st.expiresAt ? '（' + esc(st.expiresAt) + '，' + (st.source === "manual" ? "自己填的" : "GitHub 回報的") + '）' : '') +
+      (st.checkedAt ? '<br>上次檢查 ' + esc(fmtTime(st.checkedAt)) : '<br>還沒檢查過') +
+      '<br>檢查是拿<b>這個 App 自己那把金鑰</b>去問 ' + esc(repo ? repo : "GitHub") + '，不會用到別的 App 的。</p>' +
+    '<label class="field"><span class="fl">自己填一個日期（選填，備援用）</span>' +
+      '<input id="f-exp" type="text" inputmode="numeric" placeholder="2026-12-02" value="' +
+      esc(st.source === "manual" && st.expiresAt ? st.expiresAt : "") + '">' +
+      '<span class="hint">自動測得到的時候會蓋掉它 —— 自動比人記得準。留空＝清掉。</span></label>' +
+    '<div class="sheet-acts"><button class="cancel" id="sh-cancel">算了</button>' +
+      '<button class="go" id="sh-check">重新檢查</button></div>' +
+    '<button class="loadmore" id="sh-manual">存我填的日期</button>',
+    function () {
+      $("sh-cancel").onclick = closeSheet;
+      $("sh-check").onclick = function () {
+        var btn = $("sh-check");
+        btn.disabled = true; btn.textContent = "問 GitHub…";
+        checkAppKey(a).then(function (r) {
+          closeSheet();
+          toast(r.message);
+          if (r.changed) save("重新檢查了「" + a.name + "」的金鑰到期日").catch(function (e) { toast(String(e.message || e), true); });
+          else render();
+        });
+      };
+      $("sh-manual").onclick = function () {
+        var v = ($("f-exp").value || "").trim();
+        if (v && !KF.normDate(v)) return toast("日期要寫成 2026-12-02 這種樣子", true);
+        runSave($("sh-manual"), v ? ("把「" + a.name + "」的到期日填成 " + v) : ("清掉「" + a.name + "」的到期日"), function () {
+          if (v) a.keyExp = { expiresAt: v, source: "manual", checkedAt: nowIso(), state: "ok" };
+          else delete a.keyExp;
+        });
+      };
+    });
+}
+
+/* 啟動頁磚塊的位置。**固定順序**是 Benson 拍板的：不做「最近更新排前面」，
+ * 位置每天跳的話肌肉記憶就沒了。 */
+function appOrderSheet(a) {
+  var list = appsInOrder();
+  var i = list.indexOf(a);
+  function move(dir, btn) {
+    var j = i + dir;
+    if (j < 0 || j >= list.length) return;
+    runSave(btn, "把「" + a.name + "」在啟動頁的位置" + (dir < 0 ? "往前挪" : "往後挪"), function () {
+      var arr = list.slice(), t = arr[i];
+      arr[i] = arr[j]; arr[j] = t;
+      arr.forEach(function (x, k) { x.order = k; });
+    });
+  }
+  openSheet("「" + a.name + "」在啟動頁的位置",
+    '<p class="note">現在排第 ' + (i + 1) + ' 個（共 ' + list.length + ' 個）。順序是固定的，不會自己跳來跳去。</p>' +
+    '<ul class="rc-log"><li></li></ul>'.replace("<li></li>", list.map(function (x, k) {
+      return '<li><i>' + (k + 1) + '.</i>' + esc(x.emoji + " " + x.name) + (x === a ? "　←" : "") + '</li>';
+    }).join("")) +
+    '<div class="sheet-acts"><button class="cancel" id="sh-up">↑ 往前</button>' +
+      '<button class="go" id="sh-down">↓ 往後</button></div>',
+    function () {
+      $("sh-up").onclick = function () { move(-1, $("sh-up")); };
+      $("sh-down").onclick = function () { move(1, $("sh-down")); };
     });
 }
 
 function appTokenSheet(a) {
   var fs = KF.normFields(a.fields);
   if (fs.length) return appTokenSheetMulti(a, fs);
+  var repo = KF.normRepo(a.repo) || KF.repoFromUrl(a.url || "");
   openSheet("換「" + a.name + "」的金鑰",
     '<p class="note">貼新的進去，所有人的密文都會用新金鑰重產一次。' +
       '他們不用重新解鎖 —— 裝置記著的是派生金鑰，下次開 App 會自動換過去。</p>' +
+    (repo ? '<ol class="steps"><li>GitHub → Settings → Developer settings → Fine-grained tokens</li>' +
+      '<li>只勾 <b>' + esc(repo) + '</b> 這一個 repo，權限 Contents: Read and write</li>' +
+      '<li>把產生的那一串貼進來</li></ol>' : '') +
     '<label class="field"><span class="fl">新的 GitHub 金鑰</span>' +
       '<textarea id="f-token" autocapitalize="off" autocomplete="off" placeholder="github_pat_…"></textarea>' +
       '<span class="hint">現在是 ' + esc(a.token ? maskToken(a.token) : "沒有金鑰") + '</span></label>' +
+    '<p class="note">存下去之前會先去問 GitHub 這把什麼時候到期，不用自己填。' +
+      '問不到（例如是不會過期的舊式金鑰）會照實說「不會過期」，不會裝作沒事。</p>' +
     actsHtml("換掉"),
     function () {
       wireActs(function (btn) {
         var token = $("f-token").value.trim();
         if (!token) return toast("先貼上新的金鑰", true);
-        runSave(btn, "換了 " + a.name + " 的金鑰", function () { a.token = token; });
+        /* 先用**新的那把**去問一次到期日（規格：存了新金鑰的當下必測）。
+         * probe 是一個臨時物件，明文不會多存到任何地方。 */
+        btn.disabled = true; btn.textContent = "問一下 GitHub…";
+        var probe = { id: a.id, token: token, url: a.url, repo: a.repo, keyExp: null };
+        checkAppKey(probe).then(function (r) {
+          btn.disabled = false;
+          runSave(btn, "換了 " + a.name + " 的金鑰", function () {
+            a.token = token;
+            if (probe.keyExp) a.keyExp = probe.keyExp; else delete a.keyExp;
+          });
+          if (r.message) toast(r.message);
+        });
       });
     });
 }
@@ -1171,11 +1602,13 @@ function settingsSheet() {
   openSheet("設定",
     '<div class="menu-list">' +
       '<button id="s-gh">🔐 GitHub 金鑰　' + esc(ghToken() ? maskToken(ghToken()) : "還沒設") + '</button>' +
+      '<button id="s-who">🙋 這台是誰在用　' + esc(ST.who || "還沒寫") + '</button>' +
       '<button id="s-pair">📱 這台裝置的配對碼</button>' +
       '<button id="s-lock">🔒 鎖起來</button>' +
     '</div>',
     function () {
       $("s-gh").onclick = askGithubToken;
+      $("s-who").onclick = function () { whoSheet(true); };
       $("s-pair").onclick = function () {
         openSheet("這台裝置的配對碼",
           '<p class="note">要在另一支手機上開這個後台，把下面這串貼過去（或直接開這個連結）。' +
@@ -1193,6 +1626,49 @@ function settingsSheet() {
           });
       };
       $("s-lock").onclick = function () { closeSheet(); lock(); };
+    });
+}
+
+/* 「這台是誰在用」——只為了近況那一頁的「誰改的」。
+ * ⚠️ 手機端的 commit 是用鑰匙圈那把 PAT 走 GitHub API 送的，所以 git 的 author
+ *    不管是黏還是肚都是 xd1104；名字拿不到，只能自己寫進 commit message。
+ * ⚠️ 它**不是登入、不是權限**：只存在這台裝置的 localStorage，不進任何公開檔。
+ *    不想寫也可以（trailer 就會是 `by: · 手機後台`，誠實留白，不編一個名字）。 */
+function whoSheet(fromSettings) {
+  var names = (ST.P.users || []).map(function (u) { return u.emoji + " " + u.name; });
+  openSheet("這台是誰在用？",
+    '<p class="note">只用在「近況」那一頁的「誰改的」。它只存在這支手機裡，' +
+      '不會進鑰匙圈、也不會給別人看到。不想寫就按「先不要」。</p>' +
+    (names.length ? '<div class="kind" id="f-who">' + (ST.P.users || []).map(function (u) {
+      return '<button type="button" data-w="' + esc(u.name) + '" class="' + (ST.who === u.name ? "on" : "") + '">' +
+        '<span class="ke">' + esc(u.emoji || "🧑") + '</span><span><b>' + esc(u.name) + '</b>' +
+        '<span>之後的紀錄會寫「' + esc(u.name) + '（手機後台）」</span></span></button>';
+    }).join("") + '</div>' : "") +
+    '<label class="field"><span class="fl">或自己打一個</span>' +
+      '<input id="f-who-txt" type="text" value="' + esc(ST.who || "") + '" placeholder="例：肚"></label>' +
+    '<div class="sheet-acts"><button class="cancel" id="sh-cancel">先不要</button>' +
+      '<button class="go" id="sh-go">就這樣</button></div>',
+    function () {
+      if ($("f-who")) {
+        Array.prototype.forEach.call($("f-who").querySelectorAll("button"), function (b) {
+          b.onclick = function () { $("f-who-txt").value = b.getAttribute("data-w"); };
+        });
+      }
+      $("sh-cancel").onclick = function () {
+        /* 按了「先不要」就記下來，不要每次解鎖都再問一次 */
+        try { localStorage.setItem(NS + "whoAsked", "1"); } catch (e) {}
+        closeSheet();
+      };
+      $("sh-go").onclick = function () {
+        ST.who = ($("f-who-txt").value || "").trim().slice(0, 20);
+        try {
+          localStorage.setItem(NS + "who", ST.who);
+          localStorage.setItem(NS + "whoAsked", "1");
+        } catch (e) {}
+        closeSheet();
+        render();
+        if (fromSettings) toast(ST.who ? ("好，之後記成「" + ST.who + "」") : "好，之後不寫名字");
+      };
     });
 }
 
@@ -1232,6 +1708,12 @@ function askGithubToken() {
 /* ------------------------------------------------------------------ */
 (function boot() {
   try { ST.pairing = localStorage.getItem(NS + "pairing") || ""; } catch (e) { ST.pairing = ""; }
+  try { ST.who = localStorage.getItem(NS + "who") || ""; } catch (e) { ST.who = ""; }
+  /* 啟動頁的提醒帶會帶著 ?app=<id>&do=key 進來：解鎖之後直接把換金鑰那張 sheet 端出來
+   * （擋下來不等於告訴他該去哪）。 */
+  var q = /[?&]app=([^&]+)/.exec(location.search || "");
+  var act = /[?&]do=([a-z]+)/.exec(location.search || "");
+  if (q) ST.deepLink = { app: decodeURIComponent(q[1]), do: act ? act[1] : "key" };
   /* 帶配對碼的連結：#pair=XXXX-XXXX-XXXX-XXXX。收下就把它從網址列擦掉，不要留在歷史紀錄裡 */
   var m = /[#&]pair=([0-9A-Za-z-]+)/.exec(location.hash || "");
   if (m) {

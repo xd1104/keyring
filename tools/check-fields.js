@@ -466,8 +466,9 @@ async function groupF() {
     /* ── F6〜F9：2026-08-24 補。原本的紅線只掃「金鑰欄位」那條路，
      * 掃不到這次真的出事的地方——金鑰被貼進**說明（hint）**，而 hint 是自由文字、
      * 會被原樣印到「換金鑰」對話框上，於是同一格上面是遮罩、下面是明文。 */
-    const HINT_SECRET = "c1209585fake41ddc7b39e075faa0a94";   /* 32 碼十六進位，長得就像 TMDB 金鑰 */
-    const HINT_SECRET2 = "8b8610fa";                          /* 8 碼，長得就像 OMDb 金鑰 */
+    const HINT_SECRET = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";   /* 32 碼十六進位，長得就像 TMDB 金鑰。⚠️ 純合成值：
+     * 測試檔裡不准出現真金鑰的任何片段（2026-08-28 QA S-1；check-public 的 S 組會掃） */
+    const HINT_SECRET2 = "0a1b2c3d";                          /* 8 碼，長得就像 OMDb 金鑰（合成值） */
     const withSecretHints = [
       { key: "tmdb", label: "TMDB 金鑰", hint: HINT_SECRET, optional: false },
       { key: "omdb", label: "OMDb 金鑰", hint: HINT_SECRET2, optional: true },
@@ -528,7 +529,7 @@ async function groupF() {
  * 掃描——**必須變紅**。不會紅的紅線等於沒有紅線。 */
 async function groupG() {
   head("G  ★ 突變測試：把修法拿掉，F 的掃描必須抓到");
-  const HINT_SECRET = "d7f31a55fake92bb08c4e17099aa3b61";
+  const HINT_SECRET = "1f2e3d4c5b6a70819a2b3c4d5e6f8071";
   const secrets = fakeSecrets(false);
   const dir = makeSandbox("redproof", false);
   fs.writeFileSync(path.join(dir, "secrets.json"), JSON.stringify(secrets, null, 2));
@@ -978,7 +979,7 @@ function groupE() {
    * 欄位的「說明」裡放了一把長得像真金鑰的字串（實際發生過），
    * 換金鑰對話框把它原樣印在遮罩那行後面，於是同一格出現兩個對不起來的「現況」。
    * 這裡驗的是**畫面產生器的輸出**，不是 HTTP 回應（那條在 F 組）。 */
-  const HINTKEY = "c1209585fake41ddc7b39e075faa0a94";
+  const HINTKEY = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
   const Fh = [
     { key: "tmdb", label: "TMDB 金鑰", hint: HINTKEY, optional: false },
     { key: "omdb", label: "OMDb 金鑰", hint: "8b8610fa", optional: true },

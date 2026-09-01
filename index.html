@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f4ee">
+<meta name="description" content="我的 App：一頁打開全部。">
+<link rel="icon" href="public/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="public/favicon.svg">
+<title>我的 App</title>
+<link rel="stylesheet" href="launch/launch.css">
+</head>
+<body>
+<!--
+  啟動頁（2026-08-28）
+  ⚠️ 這一頁**免密碼**，它讀的 apps.json 是公開檔：裡面一個祕密都沒有
+     （名字／圖示／網址／repo／順序／有沒有金鑰／到期日，就這些）。
+  ⚠️ 磚塊是真的 <a href target="_blank">：長按可以「在新分頁開」，離線也點得開。
+-->
+<div class="wrap">
+  <div class="lc-head">
+    <h1>我的 App</h1>
+    <a class="mini" href="web/">🔑 管理</a>
+  </div>
+  <div id="lc-body"><div class="tiles" id="lc-sk"></div></div>
+</div>
+<div id="toast" class="hidden"></div>
+<script src="client/keyring-fields.js"></script>
+<script src="launch/launch.js"></script>
+</body>
+</html>

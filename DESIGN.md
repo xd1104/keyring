@@ -1237,3 +1237,378 @@ node tools/check-splash.js            # 53 條，全綠才算過
 node tools/check-splash.js --only=E   # 只跑畫面那組（需要 Chrome；沒有就會標「未能測」不是「過」）
 ```
 全程假金鑰、只在 `os.tmpdir()` 底下讀寫，不碰 repo 裡的 `secrets.json`／`vault.key`／`keyring.json`。
+
+
+---
+
+# 管理主控台（2026-08-28・lab-ux）
+
+**Benson 拍板的方向**：後台＝管理主控台。一個地方看到所有 App、點得進去、看得到狀態、管金鑰、管誰能用。
+**分界線**：管跨 App 共通的，不管單一 App 自己的資料（行程／食譜／交易紀錄留在各自的 repo）。
+
+demo：`demo/console-v1.html`（單檔、直接用瀏覽器開；磚塊是真連結，會開他的 App）。
+右下角「⚙︎ demo」可切換金鑰情境（快到期／都正常／已過期／沒檢查過）、啟動頁狀態（正常／載入中／離線／抓不到更新時間／一個都沒有）、三個畫面。**預設收合、選完自動收合**。
+
+---
+
+## 1. 資訊架構：一個新頁 ＋ 一個新分頁（不是四個頁）
+
+四個功能不對應四個畫面。**「上次更新時間」與「金鑰到期」不是頁面，是屬性**，該長在使用者已經會看的東西上。
+
+| 功能 | 它住在哪 | 為什麼 |
+|---|---|---|
+| ① App 啟動頁 | **新頁面**：`/`（公開、免密碼、加主畫面） | 他每天用，主場在手機 |
+| ② 金鑰到期提醒 | 啟動頁的**提醒帶**（≤14 天才出現）＋ 後台 App 卡片上的一顆 chip | 提醒要出現在他每天會看的地方，不是要他去某頁查 |
+| ③ 變更紀錄 | 後台**新分頁「近況」** | 唯一真正需要一整頁的東西 |
+| ④ 各 App 狀態 | 啟動頁磚塊上的一行灰字 ＋ 後台卡片的 chip ＋ 卡片可展開看最近 3 筆 | 同上 |
+
+**刻意不做的**：不做「全部正常」的儀表板。沒事的時候啟動頁只有一行安靜的
+「🔑 4 把金鑰都還有效 · 資料截至 15:42」，沒有提醒帶。有事才說話。
+
+**「近況」只放鑰匙圈的稽核紀錄，不放各 App 的更新清單。**
+兩者是不同的東西（「鑰匙圈被誰改了」vs「我的 App 有沒有在動」），硬湊一頁就變回儀表板。
+
+---
+
+## 2. 啟動頁（最重要的一頁）
+
+### 2-1 放哪裡
+
+`https://xd1104.github.io/keyring/` ——**repo 根目錄的 `index.html`**，最短的網址，加主畫面用。
+手機後台維持在 `/keyring/web/`。
+
+> ⚠️ 現在 Pages 根目錄是 Jekyll 把 README 渲染出來的頁。加 `index.html` 之後 Jekyll 會優先服務它，
+> 但為了讓靜態檔行為可預期，**建議同時加一個空的 `.nojekyll`**（代價：README 那張 landing page 不再渲染，本來也沒人用）。
+> 若 `.nojekyll` 造成任何 Pages 部署異常，退路是把啟動頁放 `/keyring/go/`，其餘設計完全不變。
+
+### 2-2 版面（手機 2 欄、520px 起 3 欄、700px 起 4 欄、容器上限 720px）
+
+```
+我的 App                              [🔑 管理]
++------------------------------------------+
+| 🟠 食譜本 的金鑰還有 9 天          [去換] |  <- 只在 <=14 天／已過期時出現
+|    過期那天它會安靜地存不了東西…          |
++------------------------------------------+
+ +--------+ +--------+
+ |  🧳    | |  🍳  ●|  <- 右上角琥珀/紅點＝這把金鑰有事
+ |旅途手帳 | | 食譜本 |
+ | 2 小時前| | 4 天前 |  <- pushed_at，灰字
+ +--------+ +--------+
+ …
+        🔑 4 把金鑰都還有效
+        資料截至 15:42 · 重新整理
+ +--------------------------------------+
+ | 把這一頁加到主畫面，以後一按就開…  ✕ |  <- 可關，關了記在 localStorage
+ +--------------------------------------+
+```
+
+### 2-3 三個刻意的決定
+
+1. **磚塊不分「有金鑰／只有連結」。** 他要開 App 的時候不在乎那件事；那個區別只在後台有意義。
+2. **順序固定**（`order` 欄位，後台可上移下移），**不照最近更新排序**——位置會跳來跳去，肌肉記憶就沒了。
+3. **磚塊是 `<a href target="_blank">`**，不是 JS 導頁。長按可「在新分頁開」、離線也點得開。
+
+### 2-4 離線與載入（handbook：「有沒有資料」與「畫不畫面」要解耦）
+
+- `apps.json` **cache-first**：先用 `localStorage` 那份立刻畫出來，再背景抓新的。**離線時磚塊照樣全部可點。**
+- 更新時間抓不到（離線／GitHub 限流）：那一行顯示「—」，**不擋畫面、不跳錯誤**，footer 誠實寫「更新時間這次沒拿到」。
+- 完全沒有 App：空狀態 →「去登記」進後台。
+
+### 2-5 提醒帶點下去
+
+`/keyring/web/?app=<id>&do=key` —— 手機後台解鎖後**直接把換金鑰那張 sheet 端出來**。
+（沿用 v3 那條教訓：擋下來不等於告訴他該去哪。）
+
+---
+
+## 3. 新增的公開檔：`apps.json`（repo 根目錄）
+
+**唯一新增的公開檔。一個位元組的祕密都不能有。**
+
+```jsonc
+{
+  "version": 1,
+  "generatedAt": "2026-08-28T07:42:00.000Z",
+  "apps": [
+    {
+      "id": "travel-book",           // 對應 secrets.json / keyring.json 的 app id
+      "name": "旅途手帳",
+      "emoji": "🧳",
+      "url": "https://xd1104.github.io/travel-book/",
+      "repo": "xd1104/travel-book",  // 給啟動頁查 pushed_at 用；留空＝從 url 推導，推不出就省略
+      "order": 0,
+      "keyed": true,                 // 有沒有金鑰。⚠️ 只有布林，永遠不含金鑰本身
+      "key": {                       // keyed=false 時整個省略
+        "expiresAt": "2026-12-02",   // ISO 日期；null = 這把不會過期
+        "source": "auto",            // auto = GitHub 標頭測到的；manual = 他自己填的
+        "checkedAt": "2026-08-28T07:41:58.000Z",
+        "state": "ok"                // ok | soon | expired | none | unknown
+      }
+    }
+  ]
+}
+```
+
+**白名單（只有這些 key 允許出現）**：
+`version` / `generatedAt` / `apps[]` 的 `id`,`name`,`emoji`,`url`,`repo`,`order`,`keyed`,`key`；
+`key` 底下只有 `expiresAt`,`source`,`checkedAt`,`state`。
+
+**絕對不會出現的**：`token`、`plain`、`iv`、`cipher`、`kdf`、`salt`、`users`、`pairing`、任何 hint／label 自由文字。
+
+> ⚠️ **`name`／`emoji` 是自由文字**，跟 `hint` 一樣有人會把金鑰貼進去（v3 真的發生過）。
+> 產生 `apps.json` 時這兩欄**一律過一次 `KF.looksSecret()`**，中了就整份產生失敗並在後台顯示原因，
+> 不要靜靜降級（跟公開模式那條的處理方向相反，因為這裡沒有「安全的替代值」可以倒）。
+
+### 3-1 產生器只准有一份
+
+`buildApps(state)` **寫進 `client/keyring-fields.js`**（三個介面本來就共用它），
+`server.js` 與 `web/admin.js` 都呼叫同一支。
+理由見 handbook：「同一條規則活在兩套實作裡 → 只修一邊等於沒修」，這個專案已經因此出過事。
+驗收要有一條：**同一份輸入餵給兩端，產出必須逐位元組相同**。
+
+### 3-2 機器檢查：`tools/check-public.js`（硬約束 3 的證明）
+
+1. **白名單比對**：出現任何不在上表的 key ⇒ 紅。（列准許的，不列禁止的。）
+2. **每個字串值**跑 `KF.looksSecret()` ＋ 長度/熵啟發式 ⇒ 中了就紅。
+3. **交叉比對**：`apps.json` 的任何字串，不得包含 `secrets.json` 裡任何 token 的任何 ≥8 字元子字串。
+   （只在本機跑；CI 沒有 `secrets.json` 就明確印「這一段沒測到」而不是安靜通過。）
+4. **負控組**：故意把一把假 token 塞進 `name`／`emoji`／`key.expiresAt`，**每一條都必須翻紅**；沒翻紅就是尺壞了、直接 exit 2。
+5. **涵蓋範圍自證**：掃到的欄位數少於預期 ⇒ 判定尺壞了。
+6. **兩端一致性**：3-1 那條逐位元組比對。
+
+---
+
+## 4. 金鑰到期偵測：自動為主、手動為輔
+
+### 4-1 怎麼自動測到
+
+拿**那個 App 自己的那把 token**打一次 GitHub API（`GET /user` 或 `GET /repos/{repo}`），讀回應標頭：
+
+```
+github-authentication-token-expiration: 2026-12-02 07:00:00 +0800
+```
+
+一次呼叫同時拿到**到期日**與**這把還有沒有效**。
+
+| 回應 | 判定 | 畫面 |
+|---|---|---|
+| 200 ＋ 有該標頭 | `expiresAt` = 標頭的日期 | 倒數 |
+| 200 ＋ **沒有**該標頭 | 這把不會過期（classic PAT / no expiration） | 「金鑰不會過期」 |
+| 401 | 已失效 | 「金鑰已過期」（紅） |
+| 403 / 網路失敗 | 測不到 | 維持上一次的值；沒有上一次就是 `unknown`「還沒檢查過」 |
+
+> ⚠️ **不要把「測不到」畫成「沒事」**。`unknown` 要有自己的樣子（灰 chip），
+> 否則第一次使用會看到一片綠、實際上一條都沒測。
+
+### 4-2 自動 vs 手動的取捨（規格要講清楚的部分）
+
+**自動的限制**：
+- 需要**明文 token** ⇒ 只有「電腦後台」或「手機後台解鎖後」做得到。**免密碼的啟動頁自己測不到。**
+- 只認得 GitHub 的金鑰。以後若有別家服務的金鑰（例如某個 API key），自動測不到。
+
+**所以定案是**：
+1. **自動測、結果寫進 `apps.json` 的 `key` 區塊** ⇒ 免密碼的啟動頁就看得到倒數。
+2. **到期日是固定的未來日期，一旦測到就不會失準** —— 之後的倒數是**啟動頁本機算的**，
+   不需要重新連線。這是這個設計成立的關鍵：**快照過期不會讓提醒失效**（只會讓「還沒測過的新金鑰」維持 unknown）。
+3. **什麼時候重測**：① 存了新金鑰的當下（必測）；② 每次後台解鎖後背景測一輪；
+   ③ 後台有一顆「重新檢查全部」。**不做排程**（沒有安全的地方放全部的金鑰）。
+4. **手動填只是備援**：後台可以手動指定 `expiresAt`（`source:"manual"`），
+   自動測到就**覆蓋手動值**並標回 `auto`（自動比人記得準）。
+   例外：自動回 403/失敗時不覆蓋手動值。
+
+### 4-3 門檻（兩段，這是「克制」的落點）
+
+- **≤ 30 天**：後台 App 卡片 chip 變琥珀（他打開後台才看得到）。
+- **≤ 14 天**：**啟動頁才跳提醒帶**（他每天看的地方，別吵他一個月）。
+- **已過期**：啟動頁紅色提醒帶 ＋ 磚上紅點。**永遠不擋他開 App。**
+
+### 4-4 硬約束檢查（給 lab-qa）
+
+- 到期偵測用的是**那個 App 自己的 token**，一把只打一個 repo。**不可以拿鑰匙圈自己那把去測別的 App**（那會讓一把金鑰跨 App 流動）。
+- 明文 token **不進 HTTP 回應**：電腦端在 server 內完成呼叫，只回 `{expiresAt,state}`；
+  手機端在瀏覽器裡用它解出來的那把打，也不寫進任何持久化的地方。
+
+---
+
+## 5. 各 App 的上次更新時間（不用 `APP_VER`）
+
+**一個未認證的請求就拿得到全部**（已實測，2026-08-28）：
+
+```
+GET https://api.github.com/users/xd1104/repos?sort=pushed&per_page=100
+-> 12 個 repo，每個都有 pushed_at
+```
+
+- **啟動頁**（免密碼）用這一條，`repo` 對得起來就顯示 `pushed_at`，對不上就顯示「—」。
+- **未認證限流 60 次/小時/IP** ⇒ 結果快取在 `localStorage` **30 分鐘**，footer 誠實寫「資料截至 HH:MM」，
+  另給一顆「重新整理」。撞到 429/403 就顯示「更新時間這次沒拿到（GitHub 問太多次了）」，**清單照常**。
+- **後台**（已解鎖）可以帶鑰匙圈那把 token 打同一條（限流 5000/hr、且不會被匿名快取延遲）。
+- 卡片展開「最近改了什麼」：`GET /repos/{repo}/commits?per_page=3`，一個 App 一個請求，**只在展開時才打**。
+
+> `pushed_at` 是「repo 最後被 push 的時間」，跟 Pages 有沒有部署成功無關。誠實的說法是「更新於 X」，
+> **不要寫成「已上線」**。
+
+---
+
+## 6. 變更紀錄（近況）
+
+### 6-1 根本問題：git author 沒有用
+
+實測 `xd1104/keyring` 的 commit：
+
+```
+2026-08-28T07:21:57Z | LAPTOP-7MKTAQ7K\USER | feat: 鑰匙圈後台改成桌面 App…
+2026-08-25T02:33:15Z | LAPTOP-7MKTAQ7K\USER | keyring: update 2026-08-25T02:33:15.008Z
+```
+
+- 電腦端的 author 是 `LAPTOP-7MKTAQ7K\USER`。
+- **手機端是用鑰匙圈那把 PAT 走 GitHub API 送的 ⇒ 黏 跟 肚 的 commit author 都是 `xd1104`。**
+
+**所以「誰改的」不能從 git 拿。**
+
+### 6-2 定案：把人話與人名寫進 commit message（兩端共用一份格式）
+
+```
+鑰匙圈：換了「食譜本」的金鑰
+
+by: 肚 · 手機後台
+```
+
+- 第一行＝**人話摘要**（取代現在的 `keyring: update <ISO>`）。
+- 最後一行＝`by: <名字> · <來源>` trailer。電腦後台沒有登入身分 ⇒ `by: · 電腦後台`（誠實，不要編一個名字）。
+- 兩端都讀得懂：**手機端不必 diff 任何檔案就能顯示完整的一頁**。
+- 摘要怎麼算：比對**存檔前後的 `keyring.json` 結構**（那份本來就是明文），得到
+  「新增／刪除 App」「新增／刪除成員」「某人多了／少了某 App 的權限」「換了某 App 的金鑰」（`cipher` 變了但結構沒變）。
+  **`vault.json` 是密文，永遠不 diff。**
+- 舊 commit 沒有 trailer ⇒ 顯示「電腦後台」＋原始 message，不要留白。
+
+### 6-3 兩端怎麼取資料
+
+| | 資料來源 |
+|---|---|
+| **電腦後台** | `GET /api/history?limit=30` → server 跑 `git log --format=... -- keyring.json vault.json` |
+| **手機後台** | `GET /repos/xd1104/keyring/commits?path=keyring.json&per_page=30`（帶既有的鑰匙圈 PAT） |
+
+兩邊都只解析 message，**畫面組法完全一樣**（同一支 render）。
+
+### 6-4 誠實條款
+
+存檔跑的是 `git add -A` ⇒ commit 可能夾帶別的檔。
+`/api/history` 回傳 `otherFiles` 數量，畫面顯示灰字「這次同時改到 3 個其他檔案」。
+**不要假裝那筆只動了金鑰。**
+
+### 6-5 版面
+
+日期分組（今天／昨天／M 月 D 日）＋ 左側時間軸。自己做的那幾筆圓點是珊瑚色。
+最下面一顆「看更早的」再抓 30 筆。
+
+---
+
+## 7. 資料層要動的（都是加，不改既有格式）
+
+### 7-1 `secrets.json` 的 `apps[]`（本機明文，已 gitignore）
+
+新增**三個選填欄位**，沿用 `public` / `plain` / `splash` / `fields` 的既有前例：
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `repo` | string | `owner/name`。留空 ⇒ 從 `url` 推導；推不出就留空 |
+| `order` | number | 啟動頁磚塊順序。缺 ⇒ 用陣列順序 |
+| `keyExp` | object | `{ expiresAt, source, checkedAt, state }`。這是**偵測結果的快取**，不是設定 |
+
+**`token` 允許為空字串＝「只有連結、沒有金鑰」的 App。**
+不新增 `linkOnly` 旗標——`keyed` 從 `token` 是否為空推導就好，少一個會分岔的真相來源。
+這種 App：不產密文、不出現在解鎖名單、不出現在成員授權清單。
+
+`keyring.json` / `vault.json` 的產出格式**一個位元組都不動**。
+
+### 7-2 順手要修的既有資料
+
+- **食譜本的 `url` 是 repo 網址**（`https://github.com/xd1104/benson-receipe`），點下去會跑到原始碼。
+  正確：`https://xd1104.github.io/benson-receipe/`（已實測 200）。
+- **交易日誌的 `url` 是空的**。正確：`https://xd1104.github.io/trade-log/`（已實測 200）。
+- 建議一併登記為「只有連結」的（都已實測 200）：
+  熱量 `https://xd1104.github.io/lose-weight-helper/`、
+  記帳本 `https://xd1104.github.io/accounting-book/`、
+  拼圖 `https://xd1104.github.io/brain-boosting-games/`（⚠️ 這個 repo 名要跟 Benson 確認是不是他說的「拼圖」；`parents-puzzle` 實測 404）。
+
+---
+
+## 8. 新增／修改的檔案（給 lab-dev 的清單）
+
+| 檔 | 動作 |
+|---|---|
+| `index.html`（repo 根） | **新增** 啟動頁外殼 |
+| `launch/launch.css`、`launch/launch.js` | **新增** 啟動頁（沿用 `public/admin.css` 的色票變數，一個新顏色都不加） |
+| `.nojekyll`（repo 根） | **新增**（見 2-1 的退路） |
+| `apps.json`（repo 根） | **新增**（產出物，兩端都會寫） |
+| `client/keyring-fields.js` | **加** `buildApps()`、`keyExpState()`、`summarizeChange()`、`by:` trailer 格式 —— 三端共用 |
+| `server.js` | 產 `apps.json`；`GET /api/history`；`POST /api/apps/:id/checkkey`；commit message 改人話＋trailer；`repo`/`order` 欄位 |
+| `public/admin.js` | App 卡片加到期 chip ＋ 更新時間 ＋ 展開；新增「近況」分頁；登記表單加類型選擇／repo |
+| `web/admin.js` | **同上全部**（這是另一套實作，少做一項就等於沒做） |
+| `tools/check-public.js` | **新增**（第 3-2 節） |
+| `tools/check-fields.js`、`tools/check-unlock.js` | **不准變紅**（109 + 38 條） |
+
+---
+
+## 9. 命名（class 前綴）
+
+啟動頁自成一支，前綴 `lc-`（launcher），**不與 `ad-`／`kr-`／`sp-` 相撞**：
+`lc-head` / `alert` / `tiles` / `tile`（`em`/`nm`/`sub`/`dot`）/ `lc-foot` / `a2hs` / `offline` / `emptybox`。
+後台新增的：`rc-url` / `rc-open` / `rc-log` / `chip.warn|bad|ok|none` / `tl`（timeline）/ `day` / `kind` / `steps` / `expbox`。
+
+> ⚠️ 啟動頁是**獨立頁面、不注入宿主**，所以不需要 `.kr-x.kr-x` 那種自我加倍。
+> 但後台新增的 class 是加進既有 CSS，**改完要做「載與不載新 CSS」的 A/B 版面比對**（handbook 那條）。
+
+---
+
+## 10. 驗收線（給 lab-qa）
+
+1. `apps.json` 過 `tools/check-public.js`，**含負控組會翻紅**。
+2. `buildApps()` 兩端逐位元組相同。
+3. `/api/*` 全部端點的回應裡搜不到任何明文 token（含新加的 `checkkey`、`history`）。
+4. 到期偵測用的是該 App 自己的 token（原始碼層掃描：三個檔都掃，反向驗證「抄別的 App 的 token」會翻紅）。
+5. 啟動頁**離線可用**：斷網後磚塊仍全部可點、清單來自快取。
+6. 觸控目標**全掃**（`querySelectorAll` 掃完逐一驗，不列白名單），高度 ≥ 44px；掃到少於 N 個就判定尺壞了。
+7. 所有 `input` computed `font-size` ≥ 16px。
+8. `check-fields.js`（109）＋ `check-unlock.js`（38）全綠。
+9. 手機端與電腦端**同一條規則兩邊都測**。
+
+---
+
+## 11. demo 已量到的數字（lab-dev 搬完要重量一次）
+
+在 headless Chrome 實測（`--headless=new` ＋ CDP 即時取樣，不是 dump-dom）：
+
+| 項目 | 實測值 |
+|---|---|
+| 390×844：第一塊磚 top | 180px（提醒帶在的情況下） |
+| 磚塊尺寸（390 寬，2 欄） | 175.5 × 112 px |
+| 320×568：最小磚寬 / 橫向捲動 | 140.5px / `scrollWidth` 320（沒有橫捲） |
+| 1200 寬：容器 / 欄數 | 720px / 4 欄 |
+| 可點元素最小高度 | 44px（全掃 11 個，0 個過小） |
+| sheet 主要按鈕 | 52px |
+| 所有 input font-size | 16px |
+| sheet 位置 | top 257、height 587，底部貼齊 844 |
+
+**兩個只有肉眼／命中測試抓得到、斷言原本沒抓到的 bug**（已修，並補進斷言）：
+① `<ol class="steps">` 沒寫 `list-style:none` ⇒ 原生數字與自畫的圓圈**同時出現**（`1. ① 到 GitHub…`）；
+② demo 控制台那顆 pill **蓋住 sheet 的「存起來」** ⇒ 改用 `document.elementFromPoint(CTA 中心)` 斷言打到的是按鈕本人，
+   這條會抓到**任何**東西的遮擋，不只是那顆 pill。
+
+**另外兩條原本「紅燈」其實是尺壞了**（記下來給下一個人）：
+① 量 sheet 位置時進場動畫還在跑 ⇒ 多量到 22px，要先 `getAnimations().forEach(a=>a.finish())`；
+② 數「展開後幾筆」時把所有卡片收合中的 `li` 一起數進去（`[hidden]` 的節點仍在 DOM）⇒ 要用
+   `getBoundingClientRect().height>0` 只數看得見的。
+
+---
+
+## 12. 想請 Benson 拍板
+
+| # | 問題 | 候選 | lab-ux 推薦 |
+|---|---|---|---|
+| 1 | 到期日要不要放進**公開**的 `apps.json` | A 放（免密碼的啟動頁就會提醒） / B 只放加密的 vault（要解鎖才看得到） | **A**。B 等於回到「他不會知道為什麼壞掉」。到期日不是祕密，最多讓人知道某把金鑰哪天失效 |
+| 2 | 啟動頁的網址 | A `xd1104.github.io/keyring/`（要加 `.nojekyll`，README landing 頁不再渲染） / B `…/keyring/go/`（零風險、多一段） | **A**。加主畫面的東西網址越短越好，README 那頁沒人看 |
+| 3 | 磚塊排序 | A 固定順序（他自己排） / B 最近更新的排前面 | **A**。B 會讓位置每天跳，肌肉記憶沒了 |
+| 4 | 「近況」要不要也放各 App 的更新清單 | A 不放（只放鑰匙圈稽核） / B 放 | **A**。更新時間已經在磚塊與卡片上；再開一份就變儀表板 |
+| 5 | 拼圖是哪一個 repo | `brain-boosting-games`？ | 需要他確認——`parents-puzzle` 實測 404 |

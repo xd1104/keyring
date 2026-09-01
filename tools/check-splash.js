@@ -221,7 +221,7 @@ function groupA() {
    *    只擋 GitHub 的話，TMDB 32 碼十六進位、sk-proj-…、AIzaSy… 全部照過，
    *    而 splash 是自由文字又是公開明文，這個 repo 已經有兩次「金鑰被貼進自由文字欄」的前科。 */
   const secrets = ["ghp_" + "a".repeat(30), "github_pat_" + "b".repeat(22),
-    "c120958563d41ddc7b39e075faa0a94c", "sk-proj-abcdefghijklmnopqrst", "AIzaSyA1B2C3D4E5F6G7H8I9J0"];
+    "0a1b2c3d4e5f60718293a4b5c6d7e8f9"   /* 合成值，不是真金鑰 */, "sk-proj-abcdefghijklmnopqrst", "AIzaSyA1B2C3D4E5F6G7H8I9J0"];
   const fine = ["紀律比行情重要", "交易日誌", "吃什麼都好", "Trade with discipline"];
   check("A10. ★ 開場外觀是公開明文 → 看起來像金鑰的一律擋（TMDB／OpenAI／Google 的也算）",
     secrets.every((t) => !!KF.splashBlockReason({ tagline: t })) &&
@@ -251,7 +251,7 @@ function groupA() {
   const r3 = (bg) => REF.ratio(KF.onColor(bg), bg);
 
   /* ⭐ 出路要講在前面：他是在被擋下來、正在困惑的當下讀這句話。 */
-  const blocked = KF.splashBlockReason({ tagline: "c120958563d41ddc7b39e075faa0a94c" });
+  const blocked = KF.splashBlockReason({ tagline: "0a1b2c3d4e5f60718293a4b5c6d7e8f9" });
   check("A10b. ★ 守門訊息是純文字（沒有 markdown），而且開頭就告訴他怎麼過關",
     mdHits(blocked).length === 0 && /^「標語」/.test(blocked) &&
     blocked.indexOf("空格") < blocked.indexOf("像一把金鑰"),
@@ -607,7 +607,7 @@ async function groupE() {
         .map(function(el){ var b = el.getBoundingClientRect();
           return { id: el.id || el.className || el.tagName, w: Math.round(b.width), h: Math.round(b.height) }; });
       /* 第三條路：守門訊息在手機上**實際被畫出來**的樣子 */
-      g("sp-tag").value = "c120958563d41ddc7b39e075faa0a94c"; g("sp-tag").dispatchEvent(new Event("input"));
+      g("sp-tag").value = "0a1b2c3d4e5f60718293a4b5c6d7e8f9"; g("sp-tag").dispatchEvent(new Event("input"));
       document.getElementById("sh-go").click();
       await new Promise((res)=>setTimeout(res,200));
       const toastText = document.getElementById("toast").textContent;

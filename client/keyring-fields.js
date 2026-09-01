@@ -54,12 +54,16 @@
     if (/\s/.test(t)) return false;                 /* 有空白＝是句子不是金鑰 */
     if (/^[0-9a-f]{8,}$/i.test(t)) return true;     /* 純十六進位 ≥8：TMDB 32 碼、OMDb 8 碼都在這 */
     if (/^[A-Za-z0-9_\-.]{16,}$/.test(t)) return true; /* 夠長的不透明字串：PAT／base64 那類 */
+    /* ⚠️ 標準 base64（有 + / =）以前整組漏掉，而**這個系統自己最要命的兩樣東西正是這一型**：
+     *    users[].dk（每個人的派生金鑰，44 碼）與 vault.key 裡的 key（解 vault.json 的金鑰，44 碼）。
+     *    上面那條的字元集沒有 + / =，所以那兩種金鑰材料一路暢行 —— 這是 2026-08-28 QA 抓到的。 */
+    if (/^[A-Za-z0-9+/]{16,}={0,2}$/.test(t)) return true;
     return false;
   }
 
   /** 顯示用的說明：像金鑰就不要印出來，改印一句叫他去搬走的話。 */
   function safeHint(s) {
-    return looksSecret(s)
+    return secretishDeep(s)
       ? "⚠ 這一格的說明看起來像一把金鑰，已隱藏。金鑰請填在上面的輸入框，並把說明清空。"
       : trim(s);
   }
@@ -68,7 +72,7 @@
    *  因為宣告欄位的表單從頭到尾沒有讓人填值的地方，他只會挑最像的那一格。
    *  標題不能整個藏掉（那格就沒名字了），所以退回用代號當標題並標記。 */
   function safeLabel(label, key) {
-    return looksSecret(label) ? (trim(key) || "這一格") + "（⚠ 標題看起來像金鑰，已隱藏）" : trim(label);
+    return secretishDeep(label) ? (trim(key) || "這一格") + "（⚠ 標題看起來像金鑰，已隱藏）" : trim(label);
   }
 
   /** 寫入端的守門：標題／說明都不准放金鑰。回空字串＝沒問題。 */
@@ -76,10 +80,10 @@
     var list = Array.isArray(fields) ? fields : [];
     for (var i = 0; i < list.length; i++) {
       var f = list[i] || {};
-      var where = looksSecret(f.label) ? "標題" : (looksSecret(f.hint) ? "說明" : "");
+      var where = secretishDeep(f.label) ? "標題" : (secretishDeep(f.hint) ? "說明" : "");
       if (where) {
         /* 這串是丟進 toast 的**純文字**，不要用 markdown 的星號（會原樣顯示出來）。 */
-        return "「" + (looksSecret(f.label) ? (trim(f.key) || "其中一格") : (trim(f.label) || trim(f.key))) +
+        return "「" + (secretishDeep(f.label) ? (trim(f.key) || "其中一格") : (trim(f.label) || trim(f.key))) +
           "」的" + where + "欄裡是一把金鑰。這張表單只有代號／標題／說明，" +
           "沒有一格是填金鑰的——把它清空、按存檔，接著就會跳出填金鑰的畫面。";
       }
@@ -502,7 +506,7 @@
     if (!s) return "";
     var keys = ["name", "tagline", "glyph"], i, where;
     for (i = 0; i < keys.length; i++) {
-      if (looksSecret(s[keys[i]])) {
+      if (secretishDeep(s[keys[i]])) {
         where = keys[i] === "tagline" ? "標語" : keys[i] === "name" ? "開場名字" : "符號";
         /* ⚠️ 這句是丟進 toast 的**純文字**，不要加 markdown（星號會原樣顯示成亂碼）。
          *    手冊 D 段記過一次，這裡第二次踩到——三條路（手機 toast／電腦 toast／server 的 400）
@@ -514,6 +518,346 @@
       }
     }
     return "";
+  }
+
+  /* ==================================================================
+   * 啟動頁的公開檔 apps.json（2026-08-28）
+   * ------------------------------------------------------------------
+   * `https://xd1104.github.io/keyring/` 是一頁**免密碼**的 App 啟動頁（加主畫面用）。
+   * 它讀的 apps.json 是這個 repo 裡**唯一新增的公開檔**：
+   *   ⛔ 一個位元組的祕密都不能有 —— 沒有 token／plain／iv／cipher／kdf／salt／users。
+   *   ⭐ 用**白名單**產生（只寫下面列的鍵），不是「把危險的鍵刪掉」：
+   *      黑名單漏一個新欄位就外洩，白名單漏一個只是少顯示一樣東西。
+   *
+   * ⚠️ 這支 buildApps() 是**唯一的產生器**，server.js（電腦端）與 web/admin.js（手機端）
+   *    都呼叫它。這個專案已經因為「同一條規則活在兩套實作裡」出過事
+   *    （金鑰沿用只修了電腦端），所以規則只准有一份，驗收要證明兩端**逐位元組相同**。
+   * ================================================================== */
+
+  var APPS_VERSION = 1;
+  /* 白名單：apps.json 裡准許出現的鍵，就這些（tools/check-public.js 拿同一份去比對） */
+  var APPS_TOP_KEYS = ["version", "generatedAt", "apps"];
+  var APPS_ITEM_KEYS = ["id", "name", "emoji", "url", "repo", "order", "keyed", "key"];
+  var APPS_KEY_KEYS = ["expiresAt", "source", "checkedAt", "state"];
+  var KEY_STATES = ["ok", "soon", "expired", "none", "unknown"];
+  /* 兩段門檻（刻意不同）：後台的 chip 早一點提醒，他每天看的啟動頁晚一點才吵他 */
+  var KEY_SOON_DAYS = 30;    /* 後台卡片的 chip 轉琥珀 */
+  var KEY_ALERT_DAYS = 14;   /* 啟動頁才跳提醒帶 */
+
+  var REPO_RE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+  var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  var HTTP_RE = /^https?:\/\/[^\s]+$/;
+
+  /** `owner/name`。也吃得下整條 GitHub 網址；看不懂就回 ""（＝沒設定，不要亂猜） */
+  function normRepo(v) {
+    var t = trim(v).replace(/^https?:\/\/(www\.)?github\.com\//i, "").replace(/\.git$/i, "").replace(/\/+$/, "");
+    return REPO_RE.test(t) ? t : "";
+  }
+  /** 從 App 網址推導 repo（推不出就回 ""，畫面顯示「—」，不要猜一個錯的出來） */
+  function repoFromUrl(url) {
+    var t = trim(url);
+    var m = /^https?:\/\/([A-Za-z0-9-]+)\.github\.io\/([A-Za-z0-9_.-]+)\/?/.exec(t);
+    if (m) return normRepo(m[1] + "/" + m[2]);
+    m = /^https?:\/\/([A-Za-z0-9-]+)\.github\.io\/?$/.exec(t);
+    if (m) return normRepo(m[1] + "/" + m[1] + ".github.io");
+    m = /^https?:\/\/(www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/.exec(t);
+    if (m) return normRepo(m[2] + "/" + m[3]);
+    return "";
+  }
+  function normDate(v) {
+    var t = trim(v);
+    return DATE_RE.test(t) ? t : "";
+  }
+  /**
+   * GitHub 回應標頭 `github-authentication-token-expiration: 2026-12-02 07:00:00 +0800`
+   * → `2026-12-02`。沒有這個標頭＝這把不會過期，回 ""。
+   * ⚠️ 刻意取**標頭上那個日期本身**，不換算 UTC：GitHub 網頁上顯示的就是這一天，
+   *    換算之後會變成 12-01，跟他自己去 GitHub 看到的對不起來（差一天比不準更煩）。
+   *    倒數本來就只用在 14／30 天的門檻上，差幾小時不影響。
+   * ⚠️ 不用 new Date(字串) 解析：那個格式各家實作認不認得不一樣。
+   */
+  function expiryFromHeader(h) {
+    var d = /(\d{4})-(\d{2})-(\d{2})/.exec(str(h));
+    return d ? d[0] : "";
+  }
+
+  /**
+   * 到期偵測的**結果快取**（存在 secrets.json／vault.json 的 apps[].keyExp，不是設定）。
+   * state：ok（有到期日）／none（不會過期）／expired（401，已失效）／unknown（測不到）
+   */
+  function normKeyExp(v) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    var st = trim(v.state);
+    if (KEY_STATES.indexOf(st) < 0) st = "";
+    var at = trim(v.checkedAt);
+    var out = {
+      expiresAt: normDate(v.expiresAt) || null,
+      source: trim(v.source) === "manual" ? "manual" : "auto",
+      /* checkedAt 會進公開檔，只收 ISO 時間戳的長相（別的東西一律當成沒有） */
+      checkedAt: /^\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/.test(at) ? at : null,
+      state: st || (normDate(v.expiresAt) ? "ok" : "unknown")
+    };
+    if (!out.expiresAt && !out.checkedAt && out.state === "unknown") return null;
+    return out;
+  }
+
+  /**
+   * 算出「現在」這把金鑰是什麼狀態。**啟動頁就是拿這支在本機算倒數的**：
+   * 到期日是固定的未來日期，測到一次之後不用再連線 —— 快照過期不會讓提醒失效。
+   * ⚠️ 測不到（unknown）**不可以畫成沒事**：第一次使用會看到一片綠、其實一條都沒測。
+   */
+  function keyExpState(keyExp, nowIso) {
+    var k = normKeyExp(keyExp);
+    var base = { state: "unknown", days: null, expiresAt: null, source: "auto", checkedAt: null };
+    if (!k) return base;
+    base.expiresAt = k.expiresAt; base.source = k.source; base.checkedAt = k.checkedAt;
+    if (k.state === "expired") { base.state = "expired"; base.days = k.expiresAt ? dayDiff(k.expiresAt, nowIso) : null; return base; }
+    if (k.state === "none") { base.state = "none"; return base; }
+    if (!k.expiresAt) { base.state = k.state === "ok" ? "unknown" : k.state; return base; }
+    var d = dayDiff(k.expiresAt, nowIso);
+    base.days = d;
+    base.state = d < 0 ? "expired" : (d <= KEY_SOON_DAYS ? "soon" : "ok");
+    return base;
+  }
+  function dayDiff(dateStr, nowIso) {
+    var a = Date.parse(dateStr + "T00:00:00Z");
+    var b = Date.parse(trim(nowIso) || new Date().toISOString());
+    if (isNaN(a) || isNaN(b)) return null;
+    return Math.floor((a - b) / 86400000);
+  }
+  /** chip／提醒帶的文案（兩個後台與啟動頁共用一份，免得三個地方各講各的） */
+  function keyLabel(st) {
+    if (!st) return "";
+    if (st.state === "expired") return "金鑰已過期";
+    if (st.state === "soon") return "金鑰還有 " + st.days + " 天";
+    if (st.state === "none") return "金鑰不會過期";
+    if (st.state === "unknown") return "還沒檢查過";
+    return "金鑰還有 " + st.days + " 天";
+  }
+
+  /**
+   * 產生 apps.json（**白名單**：只寫下面列出來的鍵）。
+   * state = { apps:[ …secrets/vault 的 apps[]… ], generatedAt:"ISO" }
+   *
+   * ⚠️ name／emoji／url／repo 都是**自由文字**，而這個專案已經有三次「金鑰被貼進自由文字欄」
+   *    的前科（說明、標題、開場名字）。這裡中了就**整份產生失敗**並把原因講出來，
+   *    不做靜靜降級 —— 跟公開模式那條方向相反，因為這裡沒有「安全的替代值」可以倒。
+   */
+  /**
+   * 一看就是「代號」的字串：全小寫、用 - 或 . 分段、每一段都不長。
+   * ⚠️ 這個例外是必要的：App 的 id／名字本來就常常是 `brain-boosting-games` 這種
+   *    20 幾個字的 slug，而 looksSecret() 對「夠長的不透明 ASCII」一律judge成金鑰——
+   *    不開這個口的話，登記一個英文名字的 App 會被自己的防線擋下來。
+   * ⚠️ 開口開得很窄：只要有大小寫混雜、底線、或任何一段超過 15 個字就不算 slug；
+   *    GitHub token 與長十六進位（TMDB 那種）也明確排除。
+   */
+  function looksLikeSlug(v) {
+    var t = trim(v), seg, i, flat;
+    if (!/^[a-z0-9]+(?:[-.][a-z0-9]+)+$/.test(t)) return false;
+    if (looksLikeGithubToken(t) || /^[0-9a-f]{16,}$/i.test(t)) return false;
+    seg = t.split(/[-.]/);
+    for (i = 0; i < seg.length; i++) if (seg[i].length > 15) return false;
+    /* ⚠️ 「有分段而且每段都短」不能當成「這是代號」的證據：UUID 剛好是 8-4-4-4-12，
+     *    任何用 - 或 . 切碎的金鑰也一樣。所以把分隔符拿掉再看一次：整串是夠長的純十六進位
+     *    就不是代號。（beef-cafe 這種短的照樣放行，不會誤擋正常的 App 代號） */
+    flat = t.replace(/[-.]/g, "");
+    if (/^[0-9a-f]{16,}$/.test(flat)) return false;
+    return true;
+  }
+  /** apps.json 那條路上的「像不像金鑰」：looksSecret 但排掉單純的代號 */
+  function secretish(v) { return looksSecret(v) && !looksLikeSlug(v); }
+  /**
+   * 自由文字裡**夾著**金鑰也要抓得到（2026-08-28 QA R-2 退件）。
+   * ------------------------------------------------------------------
+   * 洞在 looksSecret() 第一行的 `有空白＝是句子不是金鑰`：那個推論只對「整格剛好等於
+   * 一把金鑰」成立。實際上最自然的貼法是**前後帶著字**——
+   *   「電影 c1209585…」「我的金鑰是 … 別外流」「token: github_pat_…」
+   * 舊規則整串一律放行，而那串會原樣被 push 到公開的 apps.json。
+   * 多欄位的整串 {"tmdb":"…","omdb":"…"} 也是同一個洞（引號括號讓整串不像金鑰），
+   * 切成 token 之後就一併解決，不必為它另開特例。
+   *
+   * 作法：把自由文字沿「不可能出現在金鑰裡的字元」切開，任何一段像金鑰就算中。
+   * 分隔符刻意**保留** + / = _ . -（base64／PAT／UUID 都會用到，切掉就等於自己把證據弄碎）。
+   */
+  function secretishDeep(v) {
+    var t = trim(v), i;
+    if (!t) return false;
+    if (secretish(t)) return true;
+    /* GitHub token 是災難等級（有 repo 寫入權），所以整串「找得到就算中」，
+     * 不管它前後黏了什麼：token=github_pat_… / ?token=… / 「我的 token 是 …」。 */
+    if (looksLikeGithubToken(t)) return true;
+    /* 切兩次：第一次保留 = （base64 的 padding 在字尾），第二次連 = 也切開
+     * （key=value 這種寫法會把金鑰跟前面的字黏成同一段，第一次切不出來）。 */
+    if (anyPartSecret(t, /[^A-Za-z0-9+/=_.-]+/)) return true;
+    if (anyPartSecret(t, /[^A-Za-z0-9+/_.-]+/)) return true;
+    return false;
+  }
+  function anyPartSecret(t, sep) {
+    var parts = t.split(sep), i;
+    for (i = 0; i < parts.length; i++) {
+      if (parts[i] && parts[i] !== t && secretish(parts[i])) return true;
+    }
+    return false;
+  }
+
+
+  function appsBlockReason(apps) {
+    var list = Array.isArray(apps) ? apps : [], i, a, where;
+    for (i = 0; i < list.length; i++) {
+      a = list[i] || {};
+      /* ⚠️ 一律用 secretishDeep()：金鑰被「前後帶著字」貼進來才是最常見的貼法。
+       *    網址也不例外——https://…/?token=github_pat_… 這種同樣要擋（以前 HTTP_RE 一過就跳過了）。 */
+      where = secretishDeep(a.name) ? "名字" : (secretishDeep(a.emoji) ? "圖示" :
+        (secretishDeep(a.repo) ? "GitHub repo" : (secretishDeep(a.url) ? "網址" : "")));
+      if (where) {
+        return "「" + (trim(a.id) || "其中一個 App") + "」的" + where + "那一格看起來像一把金鑰。"
+          + "啟動頁的清單會原樣公開在網路上（任何人都看得到），所以這次整份沒有產生。"
+          + "把那一格改成給人看的字再存一次就好。";
+      }
+      if (trim(a.url) && !HTTP_RE.test(trim(a.url))) {
+        return "「" + (trim(a.id) || "其中一個 App") + "」的網址不是一條網址（要 http:// 或 https:// 開頭）。"
+          + "啟動頁的磚塊就是靠它開 App 的，先改對再存。";
+      }
+    }
+    return "";
+  }
+
+  function buildApps(state) {
+    var st = state || {};
+    var list = Array.isArray(st.apps) ? st.apps : [];
+    var why = appsBlockReason(list);
+    if (why) throw new Error(why);
+    var stamp = trim(st.generatedAt) || new Date().toISOString();
+    var rows = list.map(function (a, i) {
+      return { a: a || {}, i: i, o: (typeof (a && a.order) === "number" && isFinite(a.order)) ? a.order : i };
+    });
+    /* 順序固定（Benson 拍板）：照 order，沒有 order 的照原陣列順序。
+       ⚠️ 不要改成「最近更新排前面」—— 位置每天跳，肌肉記憶就沒了。 */
+    rows.sort(function (x, y) { return x.o === y.o ? x.i - y.i : x.o - y.o; });
+    return {
+      version: APPS_VERSION,
+      generatedAt: stamp,
+      apps: rows.map(function (r, idx) {
+        var a = r.a;
+        var url = trim(a.url);
+        var keyed = !!trim(a.token);
+        var out = {
+          id: trim(a.id),
+          name: trim(a.name),
+          emoji: trim(a.emoji) || "📦",
+          url: url,
+          repo: normRepo(a.repo) || repoFromUrl(url),
+          order: idx,
+          keyed: keyed
+        };
+        if (keyed) {
+          var k = keyExpState(a.keyExp, stamp);
+          out.key = {
+            expiresAt: k.expiresAt || null,
+            source: k.source,
+            checkedAt: k.checkedAt || null,
+            state: k.state
+          };
+        }
+        return out;
+      })
+    };
+  }
+  /** 產出物的文字形式：兩端都用這一支，才能逐位元組相同（縮排、結尾換行都算） */
+  function appsJsonText(state) { return JSON.stringify(buildApps(state), null, 2) + "\n"; }
+
+  /* ==================================================================
+   * 變更紀錄：把「誰改的」寫進 commit message（2026-08-28）
+   * ------------------------------------------------------------------
+   * git 的 author 沒有用：電腦端一律是 LAPTOP-…\USER，手機端是走 GitHub API 送的，
+   * 黏 跟 肚 的 author 都是 xd1104。所以人名要自己寫進 message 的 trailer。
+   * 兩端共用這一份格式，手機那邊不必 diff 任何檔案就畫得出一整頁。
+   * ================================================================== */
+
+  var COMMIT_PREFIX = "鑰匙圈：";
+  var BY_RE = /^by:\s*([^·\n]*?)\s*·\s*(.+?)\s*$/m;
+
+  /** 兩份 keyring.json（本來就是明文）的結構差異 → 人話。⚠️ vault.json 是密文，永遠不 diff。
+   *  ⚠️ 密文（cipher）每次存檔都會變（IV 是隨機的），所以**不能**拿它判斷「換了金鑰」——
+   *     那件事由呼叫端自己講（它才知道剛剛做了什麼）。 */
+  function summarizeChange(before, after) {
+    var b = before || {}, a = after || {}, out = [];
+    var bApps = idx(b.apps), aApps = idx(a.apps);
+    var bUsers = idx(b.users), aUsers = idx(a.users);
+    var k;
+    for (k in aApps) if (own(aApps, k) && !own(bApps, k)) out.push("新增 App「" + nm(aApps[k]) + "」");
+    for (k in bApps) if (own(bApps, k) && !own(aApps, k)) out.push("移除 App「" + nm(bApps[k]) + "」");
+    for (k in aApps) {
+      if (!own(aApps, k) || !own(bApps, k)) continue;
+      if (nm(aApps[k]) !== nm(bApps[k])) out.push("把 App「" + nm(bApps[k]) + "」改名成「" + nm(aApps[k]) + "」");
+      if (!!aApps[k].public !== !!bApps[k].public) {
+        out.push((aApps[k].public ? "把「" : "關掉「") + nm(aApps[k]) + (aApps[k].public ? "」設成公開模式" : "」的公開模式"));
+      }
+      if (JSON.stringify(aApps[k].splash || null) !== JSON.stringify(bApps[k].splash || null)) {
+        out.push("改了「" + nm(aApps[k]) + "」的開場外觀");
+      }
+    }
+    for (k in aUsers) if (own(aUsers, k) && !own(bUsers, k)) out.push("新增成員「" + nm(aUsers[k]) + "」");
+    for (k in bUsers) if (own(bUsers, k) && !own(aUsers, k)) out.push("移除成員「" + nm(bUsers[k]) + "」");
+    for (k in aUsers) {
+      if (!own(aUsers, k) || !own(bUsers, k)) continue;
+      if (nm(aUsers[k]) !== nm(bUsers[k])) out.push("把成員「" + nm(bUsers[k]) + "」改名成「" + nm(aUsers[k]) + "」");
+      var was = appIdsOf(bUsers[k]), now = appIdsOf(aUsers[k]), i;
+      for (i = 0; i < now.length; i++) if (was.indexOf(now[i]) < 0) out.push("讓「" + nm(aUsers[k]) + "」也能用「" + appName(aApps, now[i]) + "」");
+      for (i = 0; i < was.length; i++) if (now.indexOf(was[i]) < 0) out.push("收回「" + nm(aUsers[k]) + "」的「" + appName(bApps, was[i]) + "」");
+    }
+    return out;
+
+    function idx(arr) {
+      var m = {}, i, list = Array.isArray(arr) ? arr : [];
+      for (i = 0; i < list.length; i++) if (list[i] && list[i].id) m[list[i].id] = list[i];
+      return m;
+    }
+    function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+    function nm(o) { return trim(o && o.name) || trim(o && o.id); }
+    function appName(m, id) { return m[id] ? nm(m[id]) : id; }
+    function appIdsOf(u) {
+      if (!u) return [];
+      if (Array.isArray(u.apps)) return u.apps.slice();               /* secrets／vault 的樣子 */
+      if (u.apps && typeof u.apps === "object") return Object.keys(u.apps); /* keyring.json 的樣子 */
+      return [];
+    }
+  }
+
+  /** 第一行的人話摘要。呼叫端知道自己做了什麼就用它的話，否則用結構差異推。 */
+  function commitTitle(action, diffs) {
+    var a = trim(action);
+    if (a) return a;
+    var d = Array.isArray(diffs) ? diffs.filter(function (x) { return !!trim(x); }) : [];
+    if (!d.length) return "更新了鑰匙圈";
+    if (d.length <= 2) return d.join("、");
+    return d.slice(0, 2).join("、") + " 等 " + d.length + " 項";
+  }
+  /**
+   * commit message（兩端同一份格式）：
+   *   鑰匙圈：換了「食譜本」的金鑰
+   *   （空行）
+   *   by: 肚 · 手機後台
+   * 電腦後台沒有登入身分 ⇒ `by: · 電腦後台`（誠實，不要編一個名字出來）。
+   */
+  function commitMessage(o) {
+    var opt = o || {};
+    var title = commitTitle(opt.action, opt.diffs);
+    var by = trim(opt.by), via = trim(opt.via) || "電腦後台";
+    return COMMIT_PREFIX + title + "\n\nby: " + by + " · " + via;
+  }
+  /** 讀回來：舊 commit 沒有 trailer ⇒ 當成電腦後台＋原始標題，不要留白 */
+  function parseCommitMessage(msg) {
+    var raw = str(msg).replace(/\r/g, "");
+    var first = raw.split("\n")[0];
+    var m = BY_RE.exec(raw);
+    var title = first.indexOf(COMMIT_PREFIX) === 0 ? first.slice(COMMIT_PREFIX.length) : first;
+    return {
+      title: trim(title) || "(沒有說明)",
+      by: m ? trim(m[1]) : "",
+      via: m ? trim(m[2]) : "電腦後台",
+      tagged: !!m
+    };
   }
 
   /* 現成的欄位組合：Benson 只要按一下，不用自己想代號要打什麼 */
@@ -544,6 +888,17 @@
     normColor: normColor, normGlyph: normGlyph, normSplash: normSplash,
     onColor: onColor,
     adoptSplash: adoptSplash, splashView: splashView, splashBlockReason: splashBlockReason,
+    /* 啟動頁的公開檔（白名單產生器，三端共用同一支） */
+    APPS_VERSION: APPS_VERSION, APPS_TOP_KEYS: APPS_TOP_KEYS, APPS_ITEM_KEYS: APPS_ITEM_KEYS,
+    APPS_KEY_KEYS: APPS_KEY_KEYS, KEY_STATES: KEY_STATES,
+    KEY_SOON_DAYS: KEY_SOON_DAYS, KEY_ALERT_DAYS: KEY_ALERT_DAYS,
+    normRepo: normRepo, repoFromUrl: repoFromUrl, normDate: normDate, expiryFromHeader: expiryFromHeader,
+    normKeyExp: normKeyExp, keyExpState: keyExpState, keyLabel: keyLabel,
+    looksLikeSlug: looksLikeSlug, secretish: secretish, secretishDeep: secretishDeep,
+    appsBlockReason: appsBlockReason, buildApps: buildApps, appsJsonText: appsJsonText,
+    /* 變更紀錄 */
+    COMMIT_PREFIX: COMMIT_PREFIX, summarizeChange: summarizeChange, commitTitle: commitTitle,
+    commitMessage: commitMessage, parseCommitMessage: parseCommitMessage,
     PRESETS: PRESETS, presetFor: presetFor
   };
 });

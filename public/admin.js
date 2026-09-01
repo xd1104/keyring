@@ -18,9 +18,17 @@ var EMOJIS = ["🧔","👩","🧑","👧","👦","🐱","🐶","🦊","🐻","�
 var APP_EMOJIS = ["📦","🧳","🍳","🏋️","📓","🎮"];
 
 var S = { apps:[], users:[], publish:{ok:true, message:"", at:null},
-          sync:{ok:true, message:"", adopted:false}, vault:{enabled:false} };
-var adTab = "users";
+          sync:{ok:true, message:"", adopted:false}, vault:{enabled:false},
+          appsFile:{ok:true, message:""} };
+/* 管理主控台（2026-08-28）：進來先看到 App —— 他最常做的事是看 App 的狀態 */
+var adTab = "apps";
 var formState = {};
+/* 近況（變更紀錄）與各 App 的更新時間。都是「有沒有資料」與「畫不畫面」解耦：
+ * 拿不到就顯示「—」，不擋畫面、不跳錯誤。 */
+var LOG = { rows:null, busy:false, err:"", limit:30 };
+var PUSHED = { map:{}, at:0, tried:false };
+var OPENLOG = {};      /* 哪幾張卡片被展開了 */
+var APPLOG = {};       /* appId -> 最近 3 筆 commit */
 
 /* ---------- 小工具 ---------- */
 function $(id){ return document.getElementById(id); }
@@ -66,18 +74,37 @@ function render(){
     +   '<p>管理誰可以編輯哪個 App。存檔就自動發布出去，不用另外按什麼。</p></div>'
     + pubBar()
     + syncBar()
+    + appsFileBar()
     + '<div class="ad-tabs">'
+    +   '<button class="'+(adTab==="apps"?"on":"")+'" onclick="setTab(\'apps\')">📦 App</button>'
     +   '<button class="'+(adTab==="users"?"on":"")+'" onclick="setTab(\'users\')">👥 使用者</button>'
-    +   '<button class="'+(adTab==="apps"?"on":"")+'" onclick="setTab(\'apps\')">📦 App 金鑰</button>'
+    +   '<button class="'+(adTab==="log"?"on":"")+'" onclick="setTab(\'log\')">🕘 近況</button>'
     +   '<button class="'+(adTab==="vault"?"on":"")+'" onclick="setTab(\'vault\')">📱 手機後台</button>'
     + '</div>'
-    + (adTab==="users" ? adUsers() : adTab==="apps" ? adApps() : adVault())
+    + (adTab==="users" ? adUsers() : adTab==="apps" ? adApps() : adTab==="log" ? adLog() : adVault())
     /* 手機後台那頁有自己的說明，不要再疊一段講使用者密碼的 */
     + (adTab==="vault" ? '' :
         '<div class="ad-foot">密碼是各自加密的，這裡看不到、也救不回來。<br>'
-      + '有人忘記密碼，就在這裡幫他換一組新的。金鑰的明文只留在這台電腦。</div>');
+      + '有人忘記密碼，就在這裡幫他換一組新的。金鑰的明文只留在這台電腦。<br>'
+      /* 啟動頁是免密碼的那一頁（加到手機主畫面用），本機預覽在 /launch/ */
+      + '啟動頁：<a href="'+esc(S.launchUrl||"https://xd1104.github.io/keyring/")+'" target="_blank" rel="noopener">'
+      + esc((S.launchUrl||"https://xd1104.github.io/keyring/").replace(/^https:\/\//,""))+'</a>'
+      + '　（在這台電腦先看：<a href="/launch/" target="_blank" rel="noopener">/launch/</a>）</div>');
 }
-function setTab(t){ adTab=t; render(); }
+function setTab(t){
+  adTab=t; render();
+  if(t==="log" && !LOG.rows && !LOG.busy) loadLog(LOG.limit);
+  if(t==="apps" && !PUSHED.tried) loadPushed(false);
+}
+
+/* 啟動頁的公開清單產不出來時要講原因（例如名字裡被貼了金鑰）。
+ * ⚠️ 不靜靜跳過：跳過的話啟動頁會停在舊清單，而他以為存好了。 */
+function appsFileBar(){
+  var a=S.appsFile||{};
+  if(a.ok!==false) return "";
+  return '<div class="pub-bar bad"><div class="pub-txt"><b>啟動頁的清單這次沒有更新</b>'
+    + '<span>'+esc(a.message||"")+'</span></div></div>';
+}
 
 function pubBar(){
   var p=S.publish||{};
@@ -265,6 +292,24 @@ function adUsers(){
     + '<button class="addcard" onclick="openUserForm(null)">＋ 新增使用者</button>';
 }
 
+/* 到期 chip：狀態的算法在 KF（啟動頁、兩個後台同一份），這裡只負責畫 */
+function keyChipHtml(a){
+  if(!a.keyed) return '<span class="chip none">只有連結</span>';
+  var st=a.key||{state:"unknown"};
+  var cls = st.state==="expired" ? "bad" : (st.state==="soon" ? "warn" : (st.state==="unknown" ? "none" : "ok"));
+  return '<span class="chip '+cls+'">'+esc(KF.keyLabel(st))+'</span>';
+}
+function agoOf(iso){
+  var t=Date.parse(iso||"");
+  if(isNaN(t)) return "—";
+  var d=Date.now()-t, H=3600e3, D=86400e3;
+  if(d<90e3) return "剛剛";
+  if(d<H) return Math.max(1,Math.round(d/60e3))+" 分鐘前";
+  if(d<22*H) return Math.round(d/H)+" 小時前";
+  if(d<44*H) return "昨天";
+  if(d<8*D) return Math.round(d/D)+" 天前";
+  var x=new Date(t); return (x.getMonth()+1)+"/"+x.getDate();
+}
 function adApps(){
   if(!S.apps.length){
     return '<div class="empty"><div class="big">📦</div><p>還沒登記任何 App。<br>登記之後，鑰匙才有東西可以配。</p></div>'
@@ -275,27 +320,200 @@ function adApps(){
     var chips = who.length
       ? who.map(function(u){ return '<span class="chip">'+u.emoji+' '+esc(u.name)+'</span>'; }).join("")
       : '<span class="chip none">還沒有人可以用</span>';
-    return '<div class="rowcard">'
+    var repo = a.repo || a.repoGuess || "";
+    var open = !!OPENLOG[a.id];
+    var logRows = APPLOG[a.id];
+    return '<div class="rowcard stack"><div class="rc-top">'
       + '<div class="rc-face" style="background:'+grad("sand")+'">'+a.emoji+'</div>'
       + '<div class="rc-bd"><b>'+esc(a.name)+'</b>'
+      +   (a.url ? '<span class="rc-url">'+esc(a.url.replace(/^https?:\/\//,""))+'</span>'
+                 : '<span class="rc-url miss">⚠ 還沒填網址，啟動頁點不開</span>')
+      +   '<div class="chips">'+keyChipHtml(a)
+      +     '<span class="chip">'+(repo ? "更新於 "+esc(agoOf(PUSHED.map[repo])) : "沒有 repo")+'</span>'
+      +     (a.public ? '<span class="chip warn">公開模式</span>' : '')
+      +     chips
+      +   '</div>'
       +   (a.public ? '<div class="keyline" style="color:#8a5b12">🌐 公開：這個 App 的金鑰是<b>明文</b>放在公開 repo，任何人都看得到</div>' : '')
       +   (a.publicBlocked ? '<div class="keyline" style="color:#d64545">⛔ 勾了公開但被擋下來了（值看起來是 GitHub token），目前仍然是加密的</div>' : '')
       +   '<div class="keyline">'+esc(a.masked||"（還沒有金鑰）")+'</div>'
       +   (a.splash ? '<div class="keyline">🎬 開場外觀：'+esc(splashSummary(a.splash))+'</div>' : '')
       +   ((a.fields||[]).length && a.fieldsOk===false
             ? '<div class="keyline" style="color:#8a5b12">⚠ 這個 App 分了 '+a.fields.length+' 格，但存的東西還是舊格式 —— 按「換金鑰」確認一次</div>' : '')
-      +   '<div class="chips">'+chips+'</div></div>'
+      +   '</div>'
       + '<div class="rc-acts">'
       +   '<button onclick="openKeyForm(\''+a.id+'\')">換金鑰</button>'
+      +   '<button onclick="openKeyExpForm(\''+a.id+'\')">到期日</button>'
+      +   '<button onclick="moveApp(\''+a.id+'\',\'up\',this)">↑</button>'
+      +   '<button onclick="moveApp(\''+a.id+'\',\'down\',this)">↓</button>'
+      +   '<button onclick="openAppEditForm(\''+a.id+'\')">編輯</button>'
       +   '<button onclick="openFieldsForm(\''+a.id+'\')">金鑰欄位</button>'
       +   '<button onclick="openSplashForm(\''+a.id+'\')">開場外觀</button>'
       +   '<button onclick="openPublicForm(\''+a.id+'\')">'+(a.public?'公開中':'公開')+'</button>'
       +   '<button onclick="openAppWho(\''+a.id+'\')">誰可以用</button>'
       +   '<button class="danger" onclick="askDeleteApp(\''+a.id+'\')">刪除</button>'
-      + '</div></div>';
+      + '</div></div>'
+      + (repo
+          ? '<button class="rc-open" onclick="toggleAppLog(\''+a.id+'\')">'+(open?"收起 ▴":"最近改了什麼 ▾")+'</button>'
+            + (open ? '<div class="rc-log">'+(logRows
+                ? (logRows.length ? '<ul>'+logRows.map(function(r){
+                    return '<li><i>'+esc(agoOf(r.at))+'</i>'+esc(r.title)+'</li>'; }).join("")+'</ul>'
+                  : '<p>這個 repo 還沒有 commit，或現在問不到 GitHub。</p>')
+                : '<p>抓取中…</p>')+'</div>' : '')
+          : '')
+      + '</div>';
   }).join("");
-  return '<div class="sec-title">App（'+S.apps.length+'）</div>'+rows
-    + '<button class="addcard" onclick="openAppForm()">＋ 登記新的 App</button>';
+  return '<div class="sec-title">App（'+S.apps.length+'）　順序就是啟動頁磚塊的排法</div>'+rows
+    + '<button class="addcard" onclick="openAppForm()">＋ 登記新的 App</button>'
+    + '<button class="loadmore" onclick="checkAllKeys(this)">🔄 重新檢查全部金鑰的到期日</button>';
+}
+
+/* 各 App 的「上次更新時間」：一個未認證的請求就拿得到全部（60 次/小時/IP）。
+ * 跟啟動頁共用同一份 localStorage 快取（同一個鍵、同樣 30 分鐘）。 */
+var PUSH_KEY = "keyring.launch.pushed";
+var PUSH_TTL = 30*60*1000;
+function loadPushed(force){
+  PUSHED.tried = true;
+  var cache=null;
+  try{ cache=JSON.parse(localStorage.getItem(PUSH_KEY)||"null"); }catch(e){ cache=null; }
+  if(!force && cache && cache.at && (Date.now()-cache.at)<PUSH_TTL){
+    PUSHED.map=cache.map||{}; PUSHED.at=cache.at; render(); return Promise.resolve();
+  }
+  var owner=(S.apps.map(function(a){ return String(a.repo||a.repoGuess||"").split("/")[0]; })
+    .filter(Boolean)[0])||"";
+  if(!owner) return Promise.resolve();
+  return fetch("https://api.github.com/users/"+encodeURIComponent(owner)+"/repos?sort=pushed&per_page=100",
+    { headers:{ "Accept":"application/vnd.github+json" } })
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(list){
+      var map={};
+      (list||[]).forEach(function(x){ if(x&&x.full_name) map[x.full_name]=x.pushed_at; });
+      PUSHED.map=map; PUSHED.at=Date.now();
+      try{ localStorage.setItem(PUSH_KEY, JSON.stringify({at:PUSHED.at,map:map})); }catch(e){}
+      render();
+    }, function(){
+      /* 拿不到更新時間不是錯誤：卡片照常，那一格顯示「—」 */
+      if(cache){ PUSHED.map=cache.map||{}; PUSHED.at=cache.at; render(); }
+    });
+}
+function toggleAppLog(id){
+  OPENLOG[id]=!OPENLOG[id];
+  render();
+  if(OPENLOG[id] && !APPLOG[id]) loadAppLog(id);
+}
+function loadAppLog(id){
+  var a=appById(id), repo=a && (a.repo||a.repoGuess);
+  if(!repo){ APPLOG[id]=[]; return render(); }
+  /* 未認證就好：這是公開資料，不必把任何金鑰送去 */
+  return fetch("https://api.github.com/repos/"+repo+"/commits?per_page=3",
+    { headers:{ "Accept":"application/vnd.github+json" } })
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(list){
+      APPLOG[id]=(list||[]).map(function(c){
+        return { at:(c.commit&&c.commit.author&&c.commit.author.date)||"",
+                 title:String((c.commit&&c.commit.message)||"").split("\n")[0] };
+      });
+      render();
+    }, function(){ APPLOG[id]=[]; render(); });
+}
+
+/* ---------- 近況（變更紀錄） ---------- */
+function loadLog(n){
+  LOG.busy=true; LOG.limit=n||30;
+  return api("/history?limit="+LOG.limit).then(function(d){
+    LOG.rows=d.entries||[]; LOG.err=d.message||""; LOG.busy=false; render();
+  }).catch(function(e){ LOG.rows=[]; LOG.err=e.message; LOG.busy=false; render(); });
+}
+function dayLabel(iso){
+  var t=Date.parse(iso||"");
+  if(isNaN(t)) return "不知道什麼時候";
+  var a=new Date(t), now=new Date();
+  if(a.toDateString()===now.toDateString()) return "今天";
+  if(a.toDateString()===new Date(now.getTime()-86400e3).toDateString()) return "昨天";
+  return (a.getMonth()+1)+" 月 "+a.getDate()+" 日";
+}
+function clockOf(iso){
+  var t=Date.parse(iso||"");
+  if(isNaN(t)) return "";
+  var d=new Date(t);
+  return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+}
+/* 跟手機後台同一種資料形狀、同一種畫法：{at,title,by,via,otherFiles} */
+function logRowsHtml(rows){
+  var h="", last="";
+  rows.forEach(function(e){
+    var d=dayLabel(e.at);
+    if(d!==last){ h+=(last?"</ul>":"")+'<p class="day">'+esc(d)+'</p><ul class="tl">'; last=d; }
+    var who = e.by ? esc(e.by)+"（"+esc(e.via)+"）" : esc(e.via);
+    h+='<li>'
+      + '<div class="w"><b>'+who+'</b><span>'+esc(clockOf(e.at))+'</span></div>'
+      + '<div class="t">'+esc(e.title)+'</div>'
+      + (e.otherFiles ? '<div class="x">這次同時改到 '+e.otherFiles+' 個其他檔案</div>' : '')
+      + '</li>';
+  });
+  return h+(last?"</ul>":"");
+}
+function adLog(){
+  if(LOG.busy && !LOG.rows) return '<div class="empty"><div class="big">🕘</div><p>正在讀 git 紀錄…</p></div>';
+  if(!LOG.rows || !LOG.rows.length){
+    return '<div class="empty"><div class="big">🕘</div><p>'+esc(LOG.err||"還沒有任何變更紀錄。")+'</p></div>';
+  }
+  return '<div class="sec-title">鑰匙圈被誰改過。存檔就是一筆紀錄，改不掉也刪不掉。</div>'
+    + logRowsHtml(LOG.rows)
+    + '<button class="loadmore" onclick="loadLog('+(LOG.limit+30)+')">看更早的</button>';
+}
+
+/* ---------- 金鑰到期日 ---------- */
+function checkAllKeys(btn){
+  busy(btn, "檢查中…");
+  api("/apps/checkkeys","POST").then(function(d){
+    applyState(d);
+    toast((d.lines&&d.lines.length) ? d.lines.join("；") : "沒有金鑰可以檢查", "ok");
+  }).catch(function(e){ toast(e.message,"err"); render(); });
+}
+function openKeyExpForm(id){
+  var a=appById(id), st=a.key||{state:"unknown"};
+  var repo=a.repo||a.repoGuess||"";
+  var box="";
+  if(st.state==="expired"){
+    box='<div class="expbox"><b>這把已經過期了</b>它現在存不了東西，而且不會跳錯誤——'
+      + 'App 看起來一切正常，資料就是沒進去。</div>';
+  } else if(st.state==="soon"){
+    box='<div class="expbox"><b>還有 '+st.days+' 天</b>到期日是 GitHub 自己回報的，不是我填的。</div>';
+  }
+  formState={id:id};
+  openDialog('<div class="sheet-head"><h3>「'+esc(a.name)+'」的金鑰到期日</h3>'
+    + '<button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + box
+    + '<div class="hint" style="margin-top:0">現在：<b>'+esc(KF.keyLabel(st))+'</b>'
+    +   (st.expiresAt ? '（'+esc(st.expiresAt)+'，'+(st.source==="manual"?"自己填的":"GitHub 回報的")+'）' : '')
+    +   (st.checkedAt ? '<br>上次檢查 '+esc(fmtTime(st.checkedAt)) : '<br>還沒檢查過')
+    +   '<br>檢查是拿<b>這個 App 自己那把金鑰</b>去問 '+esc(repo||"GitHub")+'，不會用到別的 App 的。</div>'
+    + '<label class="field"><span class="fl">自己填一個日期（選填，備援用）</span>'
+    +   '<input id="ke-date" type="text" inputmode="numeric" placeholder="2026-12-02" value="'
+    +   esc(st.source==="manual"&&st.expiresAt?st.expiresAt:"")+'"></label>'
+    + '<div class="hint">自動測得到的時候會蓋掉它 —— 自動比人記得準。留空＝清掉。</div>'
+    + '<button class="btn-primary" onclick="checkOneKey(\''+id+'\',this)" style="margin-bottom:10px">重新檢查</button>'
+    + '<button class="btn-ghost" onclick="saveKeyExp(\''+id+'\',this)">存我填的日期</button>');
+}
+function checkOneKey(id, btn){
+  busy(btn, "問 GitHub…");
+  api("/apps/"+encodeURIComponent(id)+"/checkkey","POST").then(function(d){
+    applyState(d); closeSheet(); toast(d.message||"檢查完了","ok");
+  }).catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="重新檢查"; } });
+}
+function saveKeyExp(id, btn){
+  var v=($("ke-date").value||"").trim();
+  busy(btn);
+  api("/apps/"+encodeURIComponent(id)+"/keyexp","POST",{expiresAt:v})
+    .then(function(d){ applyState(d); closeSheet(); toast(v?"存好了":"清掉了","ok"); })
+    .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="存我填的日期"; } });
+}
+/* 啟動頁磚塊的位置（固定順序是 Benson 拍板的，不做「最近更新排前面」） */
+function moveApp(id, dir, btn){
+  if(btn) btn.disabled=true;
+  api("/apps/"+encodeURIComponent(id)+"/move","POST",{dir:dir})
+    .then(applyState)
+    .catch(function(e){ toast(e.message,"err"); render(); });
 }
 
 /* ---------- 多欄位金鑰（共用邏輯在 client/keyring-fields.js） ----------
@@ -362,6 +580,7 @@ function formRedraw(){
     if($("af-name")) formState.name=$("af-name").value;
     if($("af-id")) formState.appId=$("af-id").value;
     if($("af-url")) formState.url=$("af-url").value;
+    if($("af-repo")) formState.repo=$("af-repo").value;
     if($("af-key")) formState.token=$("af-key").value;
     drawAppForm();
   } else if(formState.mode==="fields"){
@@ -550,42 +769,83 @@ function doDeleteUser(id, btn){
 }
 
 /* ---------- App 金鑰 ---------- */
-function openAppForm(){ formState={mode:"app", emoji:"📦", fields:[], name:"", appId:"", url:"", token:""}; drawAppForm(); }
+function openAppForm(){
+  /* kind＝先決定這個 App 要不要金鑰。只放連結的 App 不產密文、不掛在任何成員底下。
+   * 不存 linkOnly 旗標——「有沒有金鑰」從 token 是不是空的推導就好（少一個會分岔的真相來源）。 */
+  formState={mode:"app", emoji:"📦", fields:[], name:"", appId:"", url:"", repo:"", token:"", kind:"link"};
+  drawAppForm();
+}
+function openAppEditForm(id){
+  var a=appById(id);
+  formState={mode:"app", editId:id, emoji:a.emoji, fields:[], name:a.name, appId:a.id,
+             url:a.url||"", repo:a.repo||"", token:"", kind:a.keyed?"key":"link"};
+  drawAppForm();
+}
 function drawAppForm(){
+  var edit=!!formState.editId;
   var picks = APP_EMOJIS.map(function(e){
     return '<label class="pick"><input type="radio" name="afe" '+(formState.emoji===e?"checked":"")
       + ' onchange="formState.emoji=\''+e+'\'"><span>'+e+'</span></label>';
   }).join("");
-  openDialog('<div class="sheet-head"><h3>登記新的 App</h3><button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+  var kind = edit ? '' :
+    '<div class="kind">'
+    + '<button type="button" class="'+(formState.kind==="link"?"on":"")+'" onclick="pickKind(\'link\')">'
+    +   '<span class="ke">🔗</span><span><b>只放連結</b>'
+    +   '<span>只是想在啟動頁按一下就開它。不會出現在解鎖名單裡。</span></span></button>'
+    + '<button type="button" class="'+(formState.kind==="key"?"on":"")+'" onclick="pickKind(\'key\')">'
+    +   '<span class="ke">🔑</span><span><b>連結＋金鑰</b>'
+    +   '<span>這個 App 要存東西回 GitHub。登記完會直接把貼金鑰的畫面端出來。</span></span></button>'
+    + '</div>';
+  openDialog('<div class="sheet-head"><h3>'+(edit?'改「'+esc(formState.name)+'」':'登記新的 App')+'</h3>'
+    + '<button onclick="closeSheet()" aria-label="關閉">✕</button></div>'
+    + kind
     + '<label class="field"><span class="fl">App 名稱</span><input id="af-name" placeholder="例：旅途手帳" value="'+esc(formState.name||"")+'"></label>'
-    + '<label class="field"><span class="fl">代號（App 程式裡用的 id）</span>'
-    +   '<input id="af-id" placeholder="例：travel-book" autocapitalize="off" spellcheck="false" value="'+esc(formState.appId||"")+'"'
-    +   ' oninput="formState.appId=this.value" onchange="formRedraw()"></label>'
-    + '<div class="hint">要跟那個 App 前端設定的 appId 一模一樣，留空就用名字自動產生。</div>'
+    + (edit
+        ? '<div class="field"><span class="fl">代號</span><div class="keyline">'+esc(formState.appId)+'</div></div>'
+          + '<div class="hint">代號登記好就不能改（App 前端是照它去找金鑰的）。</div>'
+        : '<label class="field"><span class="fl">代號（App 程式裡用的 id）</span>'
+          + '<input id="af-id" placeholder="例：travel-book" autocapitalize="off" spellcheck="false" value="'+esc(formState.appId||"")+'"'
+          + ' oninput="formState.appId=this.value" onchange="formRedraw()"></label>'
+          + '<div class="hint">要跟那個 App 前端設定的 appId 一模一樣，留空就用名字自動產生。</div>')
     + '<div class="field"><span class="fl">圖示</span><div class="pickrow">'+picks+'</div></div>'
     + '<label class="field"><span class="fl">網址</span>'
-    +   '<input id="af-url" placeholder="https://…" inputmode="url" autocapitalize="off" spellcheck="false" value="'+esc(formState.url||"")+'"></label>'
-    + fieldsEditorHtml()
-    + ((formState.fields||[]).length
-        ? '<div class="hint">登記好之後在那一列按「換金鑰」就會看到 '+(formState.fields.length)+' 格，一格一把貼進去。</div>'
+    +   '<input id="af-url" placeholder="https://xd1104.github.io/…" inputmode="url" autocapitalize="off" spellcheck="false" value="'+esc(formState.url||"")+'"></label>'
+    + '<div class="hint">啟動頁的磚塊就是靠它開 App。</div>'
+    + '<label class="field"><span class="fl">GitHub repo（選填）</span>'
+    +   '<input id="af-repo" placeholder="xd1104/travel-book" autocapitalize="off" spellcheck="false" value="'+esc(formState.repo||"")+'"></label>'
+    + '<div class="hint">拿來顯示「上次更新時間」。留空就從網址猜（猜不到就顯示「—」，不會亂猜）。</div>'
+    + (edit ? '' : fieldsEditorHtml())
+    + (edit || (formState.fields||[]).length || formState.kind==="link"
+        ? ((formState.fields||[]).length
+            ? '<div class="hint">登記好之後在那一列按「換金鑰」就會看到 '+(formState.fields.length)+' 格，一格一把貼進去。</div>'
+            : '')
         : '<label class="field"><span class="fl">GitHub 金鑰（選填）</span>'
-          + '<input id="af-key" type="password" placeholder="留空就沿用現在這把" autocomplete="off" spellcheck="false" value="'+esc(formState.token||"")+'"></label>'
-          + '<div class="hint">'+(S.apps.length
-              ? '留空就沿用現在這把（你的 App 都共用同一把）。要給這個 App 另一把才貼。'
-              : '這是第一個 App，先貼一把進來。之後再加 App 就會自動沿用這把。')
-            + '明文只留在這台電腦。</div>')
-    + '<button class="btn-primary" onclick="saveApp(this)">登記</button>', "af-name");
+          + '<input id="af-key" type="password" placeholder="留空＝登記完再貼" autocomplete="off" spellcheck="false" value="'+esc(formState.token||"")+'"></label>'
+          /* ⛔ 這裡以前寫「留空就沿用現在這把」而且真的會抄過來 —— 那等於讓金鑰在 App
+           * 之間流動，違反鐵律：每個 App 一把、只授權它自己那一個 repo。不要改回去。 */
+          + '<div class="hint">fine-grained PAT，只授權那一個 repo 的 Contents。'
+          + '<b>刻意不從別的 App 沿用</b>——每個 App 一把。明文只留在這台電腦。</div>')
+    + '<button class="btn-primary" onclick="saveApp(this)">'+(edit?'存起來':'登記')+'</button>', "af-name");
+}
+function pickKind(k){
+  formState.kind=k;
+  formRedraw();
 }
 function saveApp(btn){
-  var n=($("af-name").value||"").trim(), id=($("af-id").value||"").trim();
+  var edit=!!formState.editId;
+  var n=($("af-name").value||"").trim(), id=edit ? formState.editId : ($("af-id").value||"").trim();
   var u=($("af-url").value||"").trim(), k=($("af-key") ? ($("af-key").value||"").trim() : "");
+  var repo=($("af-repo") ? ($("af-repo").value||"").trim() : "");
   if(!n){ toast("先給它一個名字", "err"); return; }
+  if(repo && !KF.normRepo(repo)){ toast("GitHub repo 要寫成 xd1104/travel-book 這種樣子","err"); return; }
   var fields = KF.normFields(formState.fields||[]);
   if((formState.fields||[]).length && !fields.length){
     toast("那幾格的代號還沒填（只能用英文小寫，例如 tmdb）", "err"); return;
   }
-  busy(btn, "登記中…");
-  api("/apps","POST",{name:n, appId:id, emoji:formState.emoji, url:u, token:k, fields:fields})
+  busy(btn, edit ? "存檔中…" : "登記中…");
+  var body = {name:n, emoji:formState.emoji, url:u, repo:repo, token:k, kind:formState.kind};
+  if(edit) body.id=id; else { body.appId=id; body.fields=fields; }
+  api("/apps","POST",body)
     .then(function(d){
       applyState(d); closeSheet();
       /* ⭐ 登記完**直接把填金鑰的畫面端出來**（2026-08-24 加）。
@@ -593,11 +853,15 @@ function saveApp(btn){
        * 所以「登記好了」之後他會站在一個沒有金鑰的 App 前面，而唯一能填的入口是
        * 列表上那顆「換金鑰」——實際發生過：找不到，於是把金鑰填進說明、再填進標題。
        * 與其事後擋，不如把下一步直接遞到他面前。 */
+      if (edit) { toast("存好了","ok"); return; }
       var made = d && d.appId ? appById(d.appId) : null;
-      if (made && !made.hasToken) { toast("登記好了，接著把金鑰填進來","ok"); openKeyForm(made.id); return; }
-      toast("登記好了，現有的人都已經可以用了","ok");
+      /* 只放連結的 App 沒有金鑰要填，不要硬把貼金鑰的畫面塞給他 */
+      if (made && !made.hasToken && formState.kind === "key") {
+        toast("登記好了，接著把金鑰填進來","ok"); openKeyForm(made.id); return;
+      }
+      toast(made && made.hasToken ? "登記好了，現有的人都已經可以用了" : "登記好了，啟動頁上就看得到它了","ok");
     })
-    .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent="登記"; } });
+    .catch(function(e){ toast(e.message,"err"); if(btn){ btn.disabled=false; btn.textContent=edit?"存起來":"登記"; } });
 }
 function openKeyForm(id){
   var a=appById(id);

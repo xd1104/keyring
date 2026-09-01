@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-28T08:26:02.251Z",
+  "apps": [
+    {
+      "id": "travel-book",
+      "name": "旅途手帳",
+      "emoji": "🧳",
+      "url": "https://xd1104.github.io/travel-book/",
+      "repo": "xd1104/travel-book",
+      "order": 0,
+      "keyed": true,
+      "key": {
+        "expiresAt": null,
+        "source": "auto",
+        "checkedAt": null,
+        "state": "unknown"
+      }
+    },
+    {
+      "id": "recipe-book",
+      "name": "食譜本",
+      "emoji": "🍳",
+      "url": "https://github.com/xd1104/benson-receipe",
+      "repo": "xd1104/benson-receipe",
+      "order": 1,
+      "keyed": true,
+      "key": {
+        "expiresAt": null,
+        "source": "auto",
+        "checkedAt": null,
+        "state": "unknown"
+      }
+    },
+    {
+      "id": "movie-library",
+      "name": "電影評分",
+      "emoji": "📓",
+      "url": "https://xd1104.github.io/movie-library/",
+      "repo": "xd1104/movie-library",
+      "order": 2,
+      "keyed": true,
+      "key": {
+        "expiresAt": null,
+        "source": "auto",
+        "checkedAt": null,
+        "state": "unknown"
+      }
+    },
+    {
+      "id": "trade-log",
+      "name": "交易日誌",
+      "emoji": "📦",
+      "url": "",
+      "repo": "",
+      "order": 3,
+      "keyed": true,
+      "key": {
+        "expiresAt": null,
+        "source": "auto",
+        "checkedAt": null,
+        "state": "unknown"
+      }
+    }
+  ]
+}

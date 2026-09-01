@@ -1,0 +1,89 @@
+/* ============================================================
+   鑰匙圈 · 啟動頁（免密碼那一頁）
+   色票沿用 public/admin.css，一個新顏色都沒加（demo/console-v1.html 是同一份）。
+   class 前綴 lc-（launcher），不與 ad-／kr-／sp- 相撞。
+   ⚠️ 這是獨立頁面、不注入任何宿主，所以不需要 .kr-x.kr-x 那種自我加倍。
+   ============================================================ */
+:root{
+  --bg:#f7f4ee; --card:#ffffff; --ink:#2b2620; --muted:#8f8578; --line:#e8e1d5;
+  --acc:#ff6b5e; --acc-deep:#e2503f; --ok:#2fa87a; --bad:#d64545;
+  --warn:#8a5b12; --warn-bg:#fff6e3; --warn-line:#f2dcae;
+  --shadow:0 2px 14px rgba(70,55,30,.08);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+button{font-family:inherit; border:none; background:none; cursor:pointer; color:inherit; padding:0;}
+a{color:inherit; text-decoration:none;}
+h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
+
+.wrap{max-width:720px; margin:0 auto; padding:calc(14px + env(safe-area-inset-top)) 14px 96px;}
+
+.lc-head{display:flex; align-items:center; gap:10px; padding:6px 2px 14px;}
+.lc-head h1{font-size:20px; font-weight:800; flex:1; letter-spacing:.01em;}
+.lc-head .mini{min-height:44px; padding:0 14px; border-radius:12px; background:#ece5d6;
+  font-size:13.5px; font-weight:700; color:#6b6154; display:flex; align-items:center; gap:5px;}
+
+/* 提醒帶：只有真的有事（≤14 天或已過期）才出現。沒事的時候整條不存在——不做儀表板 */
+.alert{display:flex; align-items:flex-start; gap:11px; border-radius:16px; padding:13px 14px; margin-bottom:14px;
+  background:var(--warn-bg); border:1px solid var(--warn-line);}
+.alert.bad{background:#fbeeee; border-color:#f0cfcf;}
+.alert .ai{font-size:19px; line-height:1.25; flex:0 0 auto;}
+.alert .ab{flex:1; min-width:0;}
+.alert .ab b{display:block; font-size:14.5px; font-weight:800; color:var(--warn); line-height:1.45;}
+.alert.bad .ab b{color:var(--bad);}
+.alert .ab span{display:block; font-size:12.5px; color:#8b7f6b; margin-top:3px; line-height:1.6;}
+.alert .ago{flex:0 0 auto; min-height:44px; padding:0 14px; border-radius:12px; background:var(--acc); color:#fff;
+  font-size:13.5px; font-weight:800; display:flex; align-items:center; align-self:center;}
+
+/* 磚塊：手機 2 欄、520 起 3 欄、700 起 4 欄 */
+.tiles{display:grid; grid-template-columns:repeat(2,1fr); gap:11px;}
+@media (min-width:520px){ .tiles{grid-template-columns:repeat(3,1fr);} }
+@media (min-width:700px){ .tiles{grid-template-columns:repeat(4,1fr);} }
+.tile{position:relative; background:var(--card); border-radius:20px; box-shadow:var(--shadow);
+  min-height:112px; padding:14px 12px 12px; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:7px; text-align:center; transition:transform .12s ease, box-shadow .12s ease;}
+.tile:active{transform:scale(.965); box-shadow:0 1px 6px rgba(70,55,30,.10);}
+.tile .em{font-size:31px; line-height:1;}
+.tile .nm{font-size:14.5px; font-weight:800; line-height:1.3; overflow-wrap:anywhere;}
+.tile .sub{font-size:11.5px; color:#b3a996; line-height:1.4; min-height:16px;}
+.tile.nourl{opacity:.72;}
+.tile.nourl .sub{color:var(--bad); font-weight:700;}
+/* 右上角的點＝這把金鑰有事（琥珀＝快到期、紅＝已過期）。永遠不擋他開 App */
+.tile .dot{position:absolute; top:10px; right:10px; width:10px; height:10px; border-radius:99px;
+  background:#e6a53a; box-shadow:0 0 0 3px #fff;}
+.tile .dot.bad{background:var(--bad);}
+/* 骨架（第一次進站、還沒有快取可以畫的時候） */
+.tile.sk{pointer-events:none;}
+.tile.sk .em,.tile.sk .nm,.tile.sk .sub{background:#efe9dd; color:transparent; border-radius:8px;}
+.tile.sk .em{width:34px; height:34px;} .tile.sk .nm{width:58px; height:15px;} .tile.sk .sub{width:44px; height:11px;}
+@keyframes sk{0%,100%{opacity:.55} 50%{opacity:1}}
+.tile.sk{animation:sk 1.1s ease-in-out infinite;}
+@media (prefers-reduced-motion: reduce){
+  .tile.sk{animation:none;} .tile{transition:none;}
+}
+
+.lc-foot{text-align:center; color:#b3a996; font-size:11.5px; line-height:1.9; padding:20px 8px 0;}
+/* 44px：手指點得到的最小尺寸。inline-flex 才會真的長高（純 inline 的 min-height 沒有作用） */
+.lc-foot button{display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 12px;
+  color:#8f8578; font-size:12.5px; font-weight:700; text-decoration:underline;}
+.a2hs{display:flex; align-items:center; gap:10px; margin-top:18px; background:#fff; border:1px dashed #d8cfbf;
+  border-radius:16px; padding:11px 13px;}
+.a2hs p{flex:1; font-size:12.5px; color:#6b6154; line-height:1.6;}
+.a2hs button{min-width:44px; min-height:44px; color:var(--muted); font-size:16px;}
+.offline{display:flex; align-items:center; gap:9px; border-radius:14px; padding:10px 13px; margin-bottom:13px;
+  background:#f1ece2; border:1px solid var(--line); font-size:12.5px; color:#6b6154; line-height:1.55;}
+.emptybox{text-align:center; color:var(--muted); padding:40px 16px;}
+.emptybox .big{font-size:42px;}
+.emptybox p{font-size:13.5px; margin-top:10px; line-height:1.8;}
+.emptybox .go{display:inline-flex; align-items:center; min-height:48px; padding:0 22px; margin-top:14px;
+  border-radius:15px; background:var(--acc); color:#fff; font-size:15.5px; font-weight:800;}
+
+#toast{position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top)); transform:translateX(-50%);
+  background:#2b2620; color:#fff; font-size:14px; font-weight:600; padding:12px 18px; border-radius:14px;
+  z-index:95; max-width:calc(100vw - 32px); text-align:center; line-height:1.5; transition:opacity .25s;}
+#toast.hidden{opacity:0; pointer-events:none;}

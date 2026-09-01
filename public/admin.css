@@ -177,3 +177,46 @@ h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
 .sp-cinfo span{display:block; font-size:12px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
 .sp-clr{flex:0 0 auto; min-height:32px; padding:0 11px; border-radius:9px; border:1px solid var(--line);
   background:#fff; font-size:12.5px; color:var(--muted);}
+
+/* ============================================================
+   管理主控台（2026-08-28）：App 卡片的到期 chip／更新時間／展開，與「近況」那一頁。
+   ⚠️ 既有的 .rowcard 是橫向 flex，所以**不動它**：要直向堆疊的卡片自己加 .stack。
+   ============================================================ */
+.rowcard.stack{flex-direction:column; align-items:stretch; gap:0;}
+.rc-top{display:flex; align-items:flex-start; gap:14px; width:100%; flex-wrap:wrap;}
+.rc-url{display:block; font-size:12px; color:#b3a996; margin-top:3px; overflow-wrap:anywhere; line-height:1.5;}
+.rc-url.miss{color:var(--bad); font-weight:700;}
+.chip.warn{background:#fff6e3; color:#8a5b12; border:1px solid #f2dcae;}
+.chip.bad{background:#fbeeee; color:var(--bad);}
+.chip.ok{background:#e8f6ef; color:#1f7d5b;}
+.rc-open{width:100%; min-height:44px; margin-top:10px; border-radius:12px; background:#f7f3ec;
+  font-size:13.5px; font-weight:700; color:#6b6154; display:flex; align-items:center; justify-content:center; gap:6px;}
+.rc-log{border-top:1px dashed var(--line); margin-top:10px; padding-top:9px;}
+.rc-log li{font-size:13px; color:#6b6154; line-height:1.6; padding:4px 0; display:flex; gap:8px;}
+.rc-log li i{font-style:normal; color:#b3a996; flex:0 0 68px;}
+.rc-log p{font-size:13px; color:#b3a996; line-height:1.6;}
+
+.day{font-size:12.5px; font-weight:800; color:var(--muted); margin:2px 0 10px;}
+.tl{position:relative; padding-left:22px; list-style:none; margin:0 0 14px;}
+.tl::before{content:""; position:absolute; left:5px; top:8px; bottom:8px; width:2px; background:var(--line); border-radius:2px;}
+.tl li{position:relative; padding:0 0 16px 0;}
+.tl li::before{content:""; position:absolute; left:-21px; top:6px; width:12px; height:12px; border-radius:99px;
+  background:#fff; border:2.5px solid #d8cfbf;}
+.tl li.me::before{border-color:var(--acc);}
+.tl .w{font-size:12.5px; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+.tl .w b{font-size:12.5px; font-weight:800; color:#6b6154;}
+.tl .t{font-size:15px; font-weight:700; line-height:1.55; margin-top:3px; overflow-wrap:anywhere;}
+.tl .x{font-size:12px; color:#b3a996; margin-top:4px; line-height:1.5;}
+.loadmore{width:100%; min-height:48px; border-radius:14px; background:#f3eee4; color:#6b6154;
+  font-size:15px; font-weight:700; margin-top:4px;}
+
+.kind{display:flex; flex-direction:column; gap:9px; margin-bottom:14px;}
+.kind button{display:flex; align-items:flex-start; gap:12px; text-align:left; padding:13px 14px;
+  border:1.5px solid var(--line); border-radius:15px; background:#fbfaf6; width:100%;}
+.kind button.on{border-color:var(--acc); background:#fff6f4;}
+.kind .ke{font-size:22px; line-height:1.2;}
+.kind b{display:block; font-size:15px;}
+.kind span{display:block; font-size:12.5px; color:var(--muted); margin-top:3px; line-height:1.6;}
+.expbox{background:#fff6e3; border:1px solid #f2dcae; border-radius:14px; padding:12px 14px;
+  font-size:13.5px; color:#8a5b12; line-height:1.7; margin-bottom:13px;}
+.expbox b{display:block; font-size:15px; margin-bottom:3px;}

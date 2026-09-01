@@ -29,6 +29,7 @@ const fs = require('fs');
 const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
+const https = require('https');
 const { execFile } = require('child_process');
 /* 多欄位金鑰的共用邏輯（後台 UI 的「幾格」←→「一串」互轉）。
  * 三個地方共用同一份：這裡、public/admin.js、web/admin.js。
@@ -41,6 +42,11 @@ const WEB_DIR = path.join(ROOT, 'web');
 const SECRETS_FILE = path.join(ROOT, 'secrets.json');
 const KEYRING_FILE = path.join(ROOT, 'keyring.json');
 const VAULT_FILE = path.join(ROOT, 'vault.json');
+/* 啟動頁（免密碼那一頁）與它讀的公開清單。⚠️ apps.json 裡一個祕密都不能有，
+ * 產生器只有一份：client/keyring-fields.js 的 buildApps()（手機後台呼叫同一支）。 */
+const APPS_FILE = path.join(ROOT, 'apps.json');
+const LAUNCH_DIR = path.join(ROOT, 'launch');
+const LAUNCH_INDEX = path.join(ROOT, 'index.html');
 /* 本機記著的 vault 金鑰。放本機是刻意的：這台電腦本來就有明文 PAT，
  * 存了它，存檔時才不用每次再問一次管理密碼。跟 secrets.json 一樣永不上傳。 */
 const VAULTKEY_FILE = path.join(ROOT, 'vault.key');
@@ -221,6 +227,11 @@ function buildVaultPayload() {
       /* 開場外觀：沒設就整個鍵都不要出現（空值不落地，見 keyring-fields.js 那一段） */
       const sp = KF.normSplash(a.splash);
       if (sp) o.splash = sp;
+      /* 啟動頁的三個選填欄位也要進真本，否則手機那邊存一次就把它們洗掉了 */
+      if (KF.normRepo(a.repo)) o.repo = KF.normRepo(a.repo);
+      if (typeof a.order === 'number' && isFinite(a.order)) o.order = a.order;
+      const ke = KF.normKeyExp(a.keyExp);
+      if (ke) o.keyExp = ke;
       return o;
     }),
     users: S.users.map((u) => ({
@@ -269,6 +280,15 @@ function adoptPayload(p) {
       };
       const sp = KF.adoptSplash(a, prev);
       if (sp) o.splash = sp;
+      /* 跟 fields／public／splash 同一條規則：舊版手機後台送上來的資料**沒有這幾個鍵**
+       * ＝「這版不認得」，不是「他要清掉」→ 保留這台電腦原本的設定。 */
+      const has = (k) => a && typeof a === 'object' && Object.prototype.hasOwnProperty.call(a, k);
+      const repo = has('repo') ? KF.normRepo(a.repo) : KF.normRepo(prev && prev.repo);
+      if (repo) o.repo = repo;
+      const order = has('order') ? a.order : (prev && prev.order);
+      if (typeof order === 'number' && isFinite(order)) o.order = order;
+      const ke = has('keyExp') ? KF.normKeyExp(a.keyExp) : KF.normKeyExp(prev && prev.keyExp);
+      if (ke) o.keyExp = ke;
       return o;
     }),
     users: (p.users || []).map((u) => ({
@@ -310,6 +330,13 @@ function loadSecrets() {
       a.fields = KF.normFields(a.fields); a.public = !!a.public;
       const sp = KF.normSplash(a.splash);
       if (sp) a.splash = sp; else delete a.splash;
+      /* 啟動頁用的三個選填欄位（都是「加」，既有格式一個位元組都沒動）：
+       * repo＝給啟動頁查上次更新時間用；order＝磚塊順序；keyExp＝到期偵測的結果快取。 */
+      const repo = KF.normRepo(a.repo);
+      if (repo) a.repo = repo; else delete a.repo;
+      if (typeof a.order !== 'number' || !isFinite(a.order)) delete a.order;
+      const ke = KF.normKeyExp(a.keyExp);
+      if (ke) a.keyExp = ke; else delete a.keyExp;
     });
   } catch (e) {
     if (e.code !== 'ENOENT') console.error('[secrets] 讀取失敗，改用空的鑰匙圈：', e.message);
@@ -454,7 +481,7 @@ function classifyGitError(raw) {
 }
 
 let publishing = false;
-async function publish() {
+async function publish(commitMsg) {
   if (publishing) return pubState;
   publishing = true;
   try {
@@ -483,7 +510,10 @@ async function publish() {
     await gitCmd(['add', '-A']);
     const status = await gitCmd(['status', '--porcelain']);
     if (status.trim()) {
-      await gitCmd(['commit', '-m', 'keyring: update ' + new Date().toISOString()]);
+      /* commit message 寫人話 ＋ 誰改的（2026-08-28）。
+       * git 的 author 沒有用：這台電腦一律是 LAPTOP-…\USER，手機端全部是 xd1104。
+       * 電腦後台沒有登入身分，所以 by 是空的 —— **誠實留白，不要編一個名字**。 */
+      await gitCmd(['commit', '-m', commitMsg || KF.commitMessage({ via: '電腦後台' })]);
     }
 
     /* ③ 還沒指到 GitHub 上的 repo */
@@ -554,12 +584,142 @@ async function setupRepo() {
   return publish();
 }
 
-/* 每次異動：重產 keyring.json -> 存 secrets.json -> 存 vault.json -> 自動發布 */
-async function commitChanges() {
+/* 啟動頁的公開清單 apps.json（2026-08-28）
+ * ⚠️ 只用 KF.buildApps() 產（白名單），server 這邊**不准**自己拼一份出來——
+ *    手機後台呼叫的是同一支，驗收會比對「兩端產出逐位元組相同」。
+ * 產不出來的時候（名字／圖示裡被貼了金鑰）**不寫、不降級**，把原因留在狀態列上給他看。 */
+let appsState = { ok: true, at: null, message: '' };
+async function writeAppsFile(stamp) {
+  try {
+    await writeFileAtomic(APPS_FILE, KF.appsJsonText({ apps: S.apps, generatedAt: stamp }));
+    appsState = { ok: true, at: new Date().toISOString(), message: '' };
+  } catch (e) {
+    appsState = { ok: false, at: new Date().toISOString(), message: firstLine(e && e.message) };
+    console.error('[apps.json] ' + appsState.message);
+  }
+}
+
+/* 每次異動：重產 keyring.json -> 存 secrets.json -> 產 apps.json -> 存 vault.json -> 自動發布
+ * action ＝ 這次做了什麼（人話，會變成 commit 的第一行）。呼叫端最清楚，所以由它給。 */
+async function commitChanges(action) {
+  let before = null;
+  try { before = JSON.parse(fs.readFileSync(KEYRING_FILE, 'utf8')); } catch (e) { /* 第一次還沒有 */ }
   await saveSecrets();
-  await writeFileAtomic(KEYRING_FILE, JSON.stringify(buildKeyring(), null, 2) + '\n');
+  const ring = buildKeyring();
+  await writeFileAtomic(KEYRING_FILE, JSON.stringify(ring, null, 2) + '\n');
+  await writeAppsFile(ring.updatedAt);
   await writeVault();
-  return publish();
+  /* 結構差異是備援：呼叫端沒給人話時才用它推。⚠️ 密文每次存檔都會變（IV 是隨機的），
+   * 所以「換了金鑰」這種事推不出來，一定要靠 action。 */
+  const msg = KF.commitMessage({ action, diffs: KF.summarizeChange(before, ring), via: '電腦後台' });
+  return publish(msg);
+}
+
+/* ------------------------------------------------------------------ */
+/* 變更紀錄（近況）                                                     */
+/* ------------------------------------------------------------------ */
+/* 從 git log 讀，只解析 message（手機那邊解析同一種格式，兩邊畫面組法一樣）。
+ * ⚠️ 誠實條款：存檔跑的是 git add -A，一筆 commit 可能夾帶別的檔案。
+ *    otherFiles 就是那個數量，畫面要照實說「這次同時改到 N 個其他檔案」。 */
+const RING_FILES = ['keyring.json', 'vault.json', 'apps.json'];
+async function gitHistory(limit) {
+  const n = Math.max(1, Math.min(200, Number(limit) || 30));
+  const out = await gitCmd(['log', '-n', String(n * 2), '--name-only',
+    '--format=%x1e%H%x1f%aI%x1f%an%x1f%B%x1f']);
+  const rows = [];
+  out.split('\x1e').forEach((block) => {
+    if (!block.trim()) return;
+    const parts = block.split('\x1f');
+    if (parts.length < 5) return;
+    const files = parts[4].split('\n').map((s) => s.trim()).filter(Boolean);
+    const touched = files.filter((f) => RING_FILES.indexOf(f) >= 0);
+    if (!touched.length) return;              /* 不是鑰匙圈的改動（例如我自己改程式）就不列 */
+    const p = KF.parseCommitMessage(parts[3]);
+    rows.push({
+      sha: parts[0].slice(0, 7), at: parts[1], author: parts[2],
+      title: p.title, by: p.by, via: p.via, tagged: p.tagged,
+      otherFiles: files.length - touched.length,
+    });
+  });
+  return rows.slice(0, n);
+}
+
+/* ------------------------------------------------------------------ */
+/* 金鑰到期偵測                                                        */
+/* ------------------------------------------------------------------ */
+/* ⛔ 鐵律：**用那個 App 自己的那把 token 打它自己的 repo**。
+ *    不可以拿鑰匙圈那把（或別的 App 那把）去測 —— 那等於讓金鑰跨 App 流動。
+ * ⛔ 明文 token 只在這支程式裡用一次，不進任何 HTTP 回應、不進 apps.json。
+ * 只有長得像 GitHub token 的才送得出去：TMDB／OMDb 那種金鑰送去 GitHub 毫無意義，
+ * 而且等於把一把別家的金鑰交給第三方。 */
+function ghProbe(token, repo) {
+  return new Promise((resolve) => {
+    const req = https.request({
+      host: 'api.github.com',
+      path: repo ? '/repos/' + repo : '/user',
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'keyring-admin',
+      },
+      timeout: 8000,
+    }, (res) => {
+      res.resume();
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        exp: res.headers['github-authentication-token-expiration'] || '',
+      }));
+    });
+    req.on('error', () => resolve({ status: 0, exp: '' }));
+    req.on('timeout', () => { req.destroy(); resolve({ status: 0, exp: '' }); });
+    req.end();
+  });
+}
+/* 回傳 { changed, message }；結果寫進 a.keyExp（那是快取，不是設定）。
+ * changed ＝ 「結果本身」變了（不看 checkedAt）：只有變了才值得產生一筆 commit，
+ * 否則每按一次「重新檢查」就多一筆什麼都沒改的紀錄，近況那一頁會被洗版。 */
+function keyExpFingerprint(k) {
+  const n = KF.normKeyExp(k);
+  return n ? JSON.stringify([n.expiresAt, n.source, n.state]) : '';
+}
+async function checkAppKey(a) {
+  const was = keyExpFingerprint(a && a.keyExp);
+  const r = await checkAppKeyRaw(a);
+  return { changed: keyExpFingerprint(a && a.keyExp) !== was, message: r.message };
+}
+async function checkAppKeyRaw(a) {
+  const token = String((a && a.token) || '').trim();
+  if (!token) return { message: '這個 App 沒有金鑰，沒有東西可以測' };
+  if (!KF.looksLikeGithubToken(token)) {
+    return { message: '這個 App 的金鑰不是 GitHub 金鑰，測不到到期日（可以自己填一個）' };
+  }
+  const repo = KF.normRepo(a.repo) || KF.repoFromUrl(a.url);
+  const r = await ghProbe(token, repo);
+  const now = new Date().toISOString();
+  const prev = KF.normKeyExp(a.keyExp);
+  if (r.status >= 200 && r.status < 300) {
+    const exp = KF.expiryFromHeader(r.exp);
+    /* 自動測到就覆蓋手動填的值並標回 auto（自動比人記得準）。 */
+    a.keyExp = exp
+      ? { expiresAt: exp, source: 'auto', checkedAt: now, state: 'ok' }
+      : { expiresAt: null, source: 'auto', checkedAt: now, state: 'none' };
+    return { message: exp ? ('這把到 ' + exp + ' 過期') : '這把不會過期' };
+  }
+  if (r.status === 401) {
+    a.keyExp = { expiresAt: (prev && prev.expiresAt) || null, source: 'auto', checkedAt: now, state: 'expired' };
+    return { message: 'GitHub 說這把已經無效了（過期或被撤銷）' };
+  }
+  /* 403／404／連不上：**測不到，不是沒事**。手動填過的值也不覆蓋（自動測不到時人比較準）。 */
+  if (!prev) {
+    a.keyExp = { expiresAt: null, source: 'auto', checkedAt: now, state: 'unknown' };
+  } else {
+    a.keyExp = Object.assign({}, prev, { checkedAt: now });
+  }
+  return {
+    message: r.status ? ('這次測不到（GitHub 回 ' + r.status + '），維持上一次的結果') : '連不到 GitHub，這次沒測到',
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -587,7 +747,7 @@ async function refreshFromRemote() {
     await assertSecretsSafe();
     await gitCmd(['add', '-A']);
     if ((await gitCmd(['status', '--porcelain'])).trim()) {
-      await gitCmd(['commit', '-m', 'keyring: local update ' + new Date().toISOString()]);
+      await gitCmd(['commit', '-m', KF.commitMessage({ action: '先把這台電腦上還沒送出去的改動收起來', via: '電腦後台' })]);
     }
     await gitCmd(['fetch', 'origin', branch]);
 
@@ -634,12 +794,18 @@ function viewState() {
        *    警告字串當成他原本的說明存回去。 */
       const safeFields = fields.map((f) => ({
         key: f.key, optional: f.optional,
-        label: KF.safeLabel(f.label, f.key), labelHidden: KF.looksSecret(f.label),
-        hint: KF.safeHint(f.hint), hintHidden: KF.looksSecret(f.hint),
+        label: KF.safeLabel(f.label, f.key), labelHidden: KF.secretishDeep(f.label),
+        hint: KF.safeHint(f.hint), hintHidden: KF.secretishDeep(f.hint),
       }));
       return {
         id: a.id, name: a.name, emoji: a.emoji, url: a.url || '',
         masked: KF.maskSummary(fields, a.token, maskToken), hasToken: !!a.token,
+        /* 啟動頁那三個欄位。⚠️ key 是**算好的狀態**（ok/soon/expired/none/unknown），
+         *    不是金鑰本身，也不含任何明文。 */
+        repo: KF.normRepo(a.repo) || '', repoGuess: KF.repoFromUrl(a.url || ''),
+        order: typeof a.order === 'number' ? a.order : null,
+        keyed: !!a.token,
+        key: KF.keyExpState(a.keyExp, new Date().toISOString()),
         fields: safeFields,
         /* ⭐ 每一格只給**遮罩**。後台的 HTTP API 從來不吐明文金鑰，即使 server 自己手上有——
          *    這是這個系統刻意的不變式（憑證保管系統），不要為了任何便利開這個口。
@@ -661,6 +827,9 @@ function viewState() {
     })),
     publish: pubState,
     sync: syncState,
+    /* 啟動頁的公開清單產得出來嗎（產不出來要講原因，不要靜靜跳過） */
+    appsFile: appsState,
+    launchUrl: 'https://' + REPO_OWNER + '.github.io/' + REPO_NAME + '/',
     vault: vaultState(),
     updatedAt: S.updatedAt,
   };
@@ -680,6 +849,10 @@ function vaultState() {
 
 function findUser(id) { return S.users.find((u) => u.id === id) || null; }
 function findApp(id) { return S.apps.find((a) => a.id === id) || null; }
+/* 啟動頁磚塊的排序值：沒設過 order 的照陣列順序排在一起（跟 KF.buildApps 同一條規則） */
+function ordOf(a) {
+  return (typeof a.order === 'number' && isFinite(a.order)) ? a.order : S.apps.indexOf(a);
+}
 
 /* 從請求裡取出「要存進 token 的那一串字」。
  * 多欄位 App 收 values（幫他組），單欄位收 token（原樣）。都沒帶就回 null＝不要動它。 */
@@ -700,6 +873,17 @@ async function handleApi(req, res, url) {
   const m = req.method;
 
   if (p === '/state' && m === 'GET') return sendJson(res, 200, { ok: true, state: viewState() });
+
+  /* 近況（變更紀錄）：只解析 commit message，不碰任何檔案內容 */
+  if (p === '/history' && m === 'GET') {
+    try {
+      const rows = await gitHistory(url.searchParams.get('limit'));
+      return sendJson(res, 200, { ok: true, entries: rows });
+    } catch (e) {
+      return sendJson(res, 200, { ok: true, entries: [],
+        message: '讀不到變更紀錄（這個資料夾還沒接上 git？）：' + firstLine(e && e.message) });
+    }
+  }
 
   /* 兩邊都能改：任何寫入之前先跟 GitHub 對一次時間戳，免得蓋掉手機那邊剛改的東西。
    * （設定手機後台本身、發布、接線這幾支自己處理，不走這條） */
@@ -725,14 +909,14 @@ async function handleApi(req, res, url) {
       createdAt: (V && V.createdAt) || new Date().toISOString(),
     };
     await saveVaultKey();
-    await commitChanges();
+    await commitChanges('設定了手機後台');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
   if (p === '/vault' && m === 'DELETE') {
     V = null;
     await fsp.unlink(VAULTKEY_FILE).catch(() => {});
     await fsp.unlink(VAULT_FILE).catch(() => {});
-    await commitChanges();
+    await commitChanges('關掉了手機後台');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
   if (p === '/vault/github' && m === 'POST') {
@@ -741,14 +925,14 @@ async function handleApi(req, res, url) {
     if (!token) return sendJson(res, 400, { ok: false, message: '先貼上 GitHub 金鑰' });
     if (!S.github) S.github = { token: '' };
     S.github.token = token;
-    await commitChanges();
+    await commitChanges('換了手機後台寫回 GitHub 的金鑰');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
 
   /* 這兩支「請求本身」一定算成功（HTTP 200 + ok:true）；
    * 發布結果看 state.publish，才不會讓前端把「發布沒成功」講成「失敗（200）」 */
   if (p === '/publish' && m === 'POST') {
-    await commitChanges();
+    await commitChanges('');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
   if (p === '/setup' && m === 'POST') {
@@ -771,6 +955,7 @@ async function handleApi(req, res, url) {
     const sent = Array.isArray(b.apps);
     const apps = sent ? b.apps.filter((x) => !!findApp(x)) : S.apps.map((x) => x.id);
     let u = b.id ? findUser(b.id) : null;
+    let created = false;
     if (u) {
       u.name = name; u.emoji = b.emoji || u.emoji; u.theme = b.theme || u.theme;
       if (sent) u.apps = apps;
@@ -785,8 +970,9 @@ async function handleApi(req, res, url) {
         salt, dk: deriveKey(pw, salt).toString('base64'), apps,
       };
       S.users.push(u);
+      created = true;
     }
-    await commitChanges();
+    await commitChanges(created ? ('新增成員「' + name + '」') : ('改了成員「' + name + '」'));
     return sendJson(res, 200, { ok: true, userId: u.id, state: viewState() });
   }
 
@@ -800,15 +986,16 @@ async function handleApi(req, res, url) {
     // 換密碼＝順便換 salt，再用新金鑰把他所有 App 的 PAT 重加密（buildKeyring 會做）
     u.salt = crypto.randomBytes(16).toString('base64');
     u.dk = deriveKey(pw, u.salt).toString('base64');
-    await commitChanges();
+    await commitChanges('換了「' + u.name + '」的密碼');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
 
   mt = p.match(/^\/users\/([^/]+)$/);
   if (mt && m === 'DELETE') {
     const id = decodeURIComponent(mt[1]);
+    const gone = findUser(id);
     S.users = S.users.filter((u) => u.id !== id);
-    await commitChanges();
+    await commitChanges('移除成員「' + ((gone && gone.name) || id) + '」');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
 
@@ -817,6 +1004,12 @@ async function handleApi(req, res, url) {
     const b = await readJson(req);
     const name = String(b.name || '').trim();
     if (!name) return sendJson(res, 400, { ok: false, message: '先給它一個名字' });
+    /* 名字／圖示／網址／repo 會原樣進**公開的** apps.json（啟動頁在讀）。
+     * 這個 repo 已經有三次「金鑰被貼進自由文字欄」的前科，所以寫入端先擋一次。 */
+    {
+      const whyPub = KF.appsBlockReason([{ id: b.appId || name, name, emoji: b.emoji, url: b.url, repo: b.repo }]);
+      if (whyPub) return sendJson(res, 400, { ok: false, message: whyPub });
+    }
     /* 多欄位：後台可以宣告這個 App 要哪幾格。沒帶 fields 就是單欄位（現況，行為不變）。 */
     const wantFields = b.fields === undefined ? null : KF.normFields(b.fields);
     if (wantFields) {
@@ -826,8 +1019,11 @@ async function handleApi(req, res, url) {
     /* 公開旗標：沒帶就不動（預設一律加密；新 App 沒帶就是 false） */
     const wantPublic = b.public === undefined ? null : !!b.public;
     let a = b.id ? findApp(b.id) : null;
+    const isNew = !a;
     if (a) {
       a.name = name; a.emoji = b.emoji || a.emoji; a.url = String(b.url || a.url || '');
+      /* repo 只在有送這個鍵的時候才動（舊版後台不認得它，見 adoptPayload 那條規則） */
+      if (b.repo !== undefined) { const r = KF.normRepo(b.repo); if (r) a.repo = r; else delete a.repo; }
       if (wantFields) a.fields = wantFields;
       const tk = composeToken(a, b);
       if (tk !== null) a.token = tk;
@@ -858,6 +1054,8 @@ async function handleApi(req, res, url) {
       const id = uniqueId(wanted || newId('app'), S.apps.map((x) => x.id));
       a = { id, name, emoji: b.emoji || '📦', url: String(b.url || ''), token,
         fields: wantFields || [], public: false };
+      const wantRepo = KF.normRepo(b.repo);
+      if (wantRepo) a.repo = wantRepo;
       /* 新 App 也可以直接標公開，但一樣要過那道防線（預設是 false，必須明確送 true） */
       if (wantPublic) {
         const why = KF.publicBlockReason(a);
@@ -872,14 +1070,23 @@ async function handleApi(req, res, url) {
        * 先宣告欄位、再到「換金鑰」把各格填上。危險的是「沿用別的 App 的金鑰」，
        * 不是「暫時沒有金鑰」——後者只是還不能解密，畫面會顯示「沒有金鑰」，
        * buildKeyring() 也不會為它產出任何密文。 */
+      /* 啟動頁磚塊的順序：新的排在最後面（順序固定，不會自己跳） */
+      a.order = S.apps.length;
       S.apps.push(a);
-      /* 他要管的只有成員：新 App 直接給所有現有使用者，要收再到「誰可以用」取消 */
-      S.users.forEach((u) => {
-        if (!Array.isArray(u.apps)) u.apps = [];
-        if (u.apps.indexOf(id) < 0) u.apps.push(id);
-      });
+      /* 他要管的只有成員：新 App 直接給所有現有使用者，要收再到「誰可以用」取消。
+       * ⚠️ 「只放連結」的 App 例外：它沒有金鑰可以解，掛在成員底下只是雜訊
+       *    （keyed 從 token 是不是空的推導，不另外存 linkOnly 旗標）。 */
+      const wantsKey = !!a.token || (a.fields || []).length > 0 || String(b.kind || '') === 'key';
+      if (wantsKey) {
+        S.users.forEach((u) => {
+          if (!Array.isArray(u.apps)) u.apps = [];
+          if (u.apps.indexOf(id) < 0) u.apps.push(id);
+        });
+      }
     }
-    await commitChanges();
+    /* 存了新金鑰就**當場去問一次到期日**（規格：必測）。測不到不擋存檔。 */
+    if (isNew && a.token) { try { await checkAppKey(a); } catch (e) { /* 測不到就算了 */ } }
+    await commitChanges(isNew ? ('登記了 App「' + name + '」') : ('改了 App「' + name + '」'));
     return sendJson(res, 200, { ok: true, appId: a.id, state: viewState() });
   }
 
@@ -912,8 +1119,11 @@ async function handleApi(req, res, url) {
       }
       a.token = token;
     }
-    await commitChanges();
-    return sendJson(res, 200, { ok: true, state: viewState() });
+    /* 換了金鑰＝到期日一定不一樣了，當場重測一次（規格 4-2 的①） */
+    let checked = '';
+    try { checked = (await checkAppKey(a)).message; } catch (e) { checked = ''; }
+    await commitChanges('換了「' + a.name + '」的金鑰');
+    return sendJson(res, 200, { ok: true, checked, state: viewState() });
   }
 
   /* 欄位宣告：把一個 App 從「一格」改成「幾格」（或改回去）。
@@ -937,7 +1147,7 @@ async function handleApi(req, res, url) {
       if (why) return sendJson(res, 400, { ok: false, message: why });
     }
     a.public = want;
-    await commitChanges();
+    await commitChanges(want ? ('把「' + a.name + '」設成公開模式') : ('關掉「' + a.name + '」的公開模式'));
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
 
@@ -954,7 +1164,7 @@ async function handleApi(req, res, url) {
     const why = KF.splashBlockReason(sp);
     if (why) return sendJson(res, 400, { ok: false, message: why });
     if (sp) a.splash = sp; else delete a.splash;
-    await commitChanges();
+    await commitChanges('改了「' + a.name + '」的開場外觀');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
 
@@ -976,8 +1186,70 @@ async function handleApi(req, res, url) {
         a.token = next;
       }
     }
-    await commitChanges();
+    await commitChanges('設定了「' + a.name + '」的金鑰欄位');
     return sendJson(res, 200, { ok: true, migrated, state: viewState() });
+  }
+
+  /* 金鑰到期偵測：拿**這個 App 自己的那把 token** 去打**它自己的 repo**。
+   * ⛔ 回應只給算好的狀態，明文一個字都不出這支程式。 */
+  mt = p.match(/^\/apps\/([^/]+)\/checkkey$/);
+  if (mt && m === 'POST') {
+    const a = findApp(decodeURIComponent(mt[1]));
+    if (!a) return sendJson(res, 404, { ok: false, message: '找不到這個 App' });
+    const r = await checkAppKey(a);
+    if (r.changed) await commitChanges('重新檢查了「' + a.name + '」的金鑰到期日');
+    else await saveSecrets(true);      /* 結果沒變就只更新本機的檢查時間，不產生一筆 commit */
+    return sendJson(res, 200, { ok: true, message: r.message,
+      key: KF.keyExpState(a.keyExp, new Date().toISOString()), state: viewState() });
+  }
+  /* 「重新檢查全部」：一個 App 一個請求、各用各的 token，中間任何一把失敗都不影響其他把 */
+  if (p === '/apps/checkkeys' && m === 'POST') {
+    const lines = [];
+    let changed = false;
+    for (const a of S.apps) {
+      if (!a.token) continue;
+      try {
+        const r = await checkAppKey(a);
+        changed = changed || r.changed;
+        lines.push(a.name + '：' + r.message);
+      } catch (e) {
+        lines.push(a.name + '：這次測不到（' + firstLine(e && e.message) + '）');
+      }
+    }
+    if (changed) await commitChanges('重新檢查了所有金鑰的到期日');
+    else await saveSecrets(true);
+    return sendJson(res, 200, { ok: true, lines, state: viewState() });
+  }
+  /* 手動填到期日（備援）。⚠️ 自動測得到的時候會蓋掉它並標回 auto —— 自動比人記得準。 */
+  mt = p.match(/^\/apps\/([^/]+)\/keyexp$/);
+  if (mt && m === 'POST') {
+    const a = findApp(decodeURIComponent(mt[1]));
+    if (!a) return sendJson(res, 404, { ok: false, message: '找不到這個 App' });
+    const b = await readJson(req);
+    const d = KF.normDate(b.expiresAt);
+    if (b.expiresAt && !d) {
+      return sendJson(res, 400, { ok: false, message: '日期要寫成 2026-12-02 這種樣子' });
+    }
+    if (d) a.keyExp = { expiresAt: d, source: 'manual', checkedAt: new Date().toISOString(), state: 'ok' };
+    else delete a.keyExp;
+    await commitChanges(d ? ('把「' + a.name + '」的到期日填成 ' + d) : ('清掉「' + a.name + '」的到期日'));
+    return sendJson(res, 200, { ok: true, state: viewState() });
+  }
+  /* 啟動頁磚塊的順序（固定順序是 Benson 拍板的，不做「最近更新排前面」） */
+  mt = p.match(/^\/apps\/([^/]+)\/move$/);
+  if (mt && m === 'POST') {
+    const id = decodeURIComponent(mt[1]);
+    const b = await readJson(req);
+    const dir = String(b.dir || '') === 'up' ? -1 : 1;
+    const ordered = S.apps.slice().sort((x, y) => ordOf(x) - ordOf(y));
+    const i = ordered.findIndex((x) => x.id === id);
+    if (i < 0) return sendJson(res, 404, { ok: false, message: '找不到這個 App' });
+    const j = i + dir;
+    if (j < 0 || j >= ordered.length) return sendJson(res, 200, { ok: true, state: viewState() });
+    const tmp = ordered[i]; ordered[i] = ordered[j]; ordered[j] = tmp;
+    ordered.forEach((x, k) => { x.order = k; });
+    await commitChanges('把「' + (findApp(id) || {}).name + '」在啟動頁的位置' + (dir < 0 ? '往前挪' : '往後挪'));
+    return sendJson(res, 200, { ok: true, state: viewState() });
   }
 
   mt = p.match(/^\/apps\/([^/]+)\/users$/);
@@ -992,16 +1264,17 @@ async function handleApi(req, res, url) {
       if (want && !has) u.apps.push(appId);
       if (!want && has) u.apps = u.apps.filter((x) => x !== appId);
     });
-    await commitChanges();
+    await commitChanges('改了「' + findApp(appId).name + '」可以給誰用');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
 
   mt = p.match(/^\/apps\/([^/]+)$/);
   if (mt && m === 'DELETE') {
     const id = decodeURIComponent(mt[1]);
+    const gone = findApp(id);
     S.apps = S.apps.filter((a) => a.id !== id);
     S.users.forEach((u) => { u.apps = (u.apps || []).filter((x) => x !== id); });
-    await commitChanges();
+    await commitChanges('把 App「' + ((gone && gone.name) || id) + '」拿掉');
     return sendJson(res, 200, { ok: true, state: viewState() });
   }
 
@@ -1037,6 +1310,20 @@ function serveStatic(req, res, url) {
   // 加密真本。跟 keyring.json 一樣是「本來就要公開」的檔，本機開放是為了先在電腦上試手機後台
   if (rel === '/vault.json') {
     return streamFile(res, VAULT_FILE, { 'Access-Control-Allow-Origin': '*' });
+  }
+  // 啟動頁的公開清單（正式版在 Pages 的根目錄；本機開放是為了先在電腦上把啟動頁跑一遍）
+  if (rel === '/apps.json' || rel === '/launch/apps.json') {
+    return streamFile(res, APPS_FILE, { 'Access-Control-Allow-Origin': '*' });
+  }
+  // 啟動頁本人：正式版是 https://xd1104.github.io/keyring/（repo 根目錄的 index.html）。
+  // 本機後台自己佔著 /，所以在這裡開一條 /launch/ 給它預覽。
+  if (rel === '/launch' || rel === '/launch/') {
+    return streamFile(res, LAUNCH_INDEX);
+  }
+  if (rel.indexOf('/launch/') === 0) {
+    const lf = path.join(LAUNCH_DIR, path.normalize(rel.slice(8)).replace(/^([/\\])+/, ''));
+    if (!lf.startsWith(LAUNCH_DIR)) { res.writeHead(400); return res.end('bad path'); }
+    return streamFile(res, lf);
   }
   // 手機後台：正式上線是 GitHub Pages 的 /web/，這裡讓它在電腦上也能先跑一遍
   if (rel === '/web' || rel === '/web/') rel = '/web/index.html';

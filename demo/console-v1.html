@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f4ee">
+<meta name="robots" content="noindex">
+<title>鑰匙圈 · 管理主控台 demo</title>
+<style>
+/* ============================================================
+   鑰匙圈 主控台 demo（2026-08-28・lab-ux）
+   色票沿用 public/admin.css ＋ web/admin.css，一個新顏色都沒有加。
+   全部假資料、沒有任何真金鑰；點磚是真的會開他的 App。
+   ============================================================ */
+:root{
+  --bg:#f7f4ee; --card:#ffffff; --ink:#2b2620; --muted:#8f8578; --line:#e8e1d5;
+  --acc:#ff6b5e; --acc-deep:#e2503f; --ok:#2fa87a; --bad:#d64545;
+  --warn:#8a5b12; --warn-bg:#fff6e3; --warn-line:#f2dcae;
+  --shadow:0 2px 14px rgba(70,55,30,.08);
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0; padding:0;}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+button{font-family:inherit; border:none; background:none; cursor:pointer; color:inherit; padding:0;}
+a{color:inherit; text-decoration:none;}
+h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
+
+/* ---------------- 共用外框 ---------------- */
+.wrap{max-width:720px; margin:0 auto; padding:calc(14px + env(safe-area-inset-top)) 14px 96px;}
+.scr{display:none;} .scr.on{display:block;}
+
+/* =============================================================
+   1. 啟動頁（免密碼・手機主場）
+   ============================================================= */
+.lc-head{display:flex; align-items:center; gap:10px; padding:6px 2px 14px;}
+.lc-head h1{font-size:20px; font-weight:800; flex:1; letter-spacing:.01em;}
+.lc-head .mini{min-height:40px; padding:0 13px; border-radius:12px; background:#ece5d6;
+  font-size:13.5px; font-weight:700; color:#6b6154; display:flex; align-items:center; gap:5px;}
+
+/* 提醒帶：只有真的有事才出現。沒事的時候整條不存在（不做儀表板） */
+.alert{display:flex; align-items:flex-start; gap:11px; border-radius:16px; padding:13px 14px; margin-bottom:14px;
+  background:var(--warn-bg); border:1px solid var(--warn-line);}
+.alert.bad{background:#fbeeee; border-color:#f0cfcf;}
+.alert .ai{font-size:19px; line-height:1.25; flex:0 0 auto;}
+.alert .ab{flex:1; min-width:0;}
+.alert .ab b{display:block; font-size:14.5px; font-weight:800; color:var(--warn); line-height:1.45;}
+.alert.bad .ab b{color:var(--bad);}
+.alert .ab span{display:block; font-size:12.5px; color:#8b7f6b; margin-top:3px; line-height:1.6;}
+.alert .ago{flex:0 0 auto; min-height:40px; padding:0 14px; border-radius:12px; background:var(--acc); color:#fff;
+  font-size:13.5px; font-weight:800; display:flex; align-items:center; align-self:center;}
+
+/* 磚塊：手機 2 欄、桌面自動變多欄 */
+.tiles{display:grid; grid-template-columns:repeat(2,1fr); gap:11px;}
+@media (min-width:520px){ .tiles{grid-template-columns:repeat(3,1fr);} }
+@media (min-width:700px){ .tiles{grid-template-columns:repeat(4,1fr);} }
+.tile{position:relative; background:var(--card); border-radius:20px; box-shadow:var(--shadow);
+  min-height:112px; padding:14px 12px 12px; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:7px; text-align:center; transition:transform .12s ease, box-shadow .12s ease;}
+.tile:active{transform:scale(.965); box-shadow:0 1px 6px rgba(70,55,30,.10);}
+.tile .em{font-size:31px; line-height:1;}
+.tile .nm{font-size:14.5px; font-weight:800; line-height:1.3; overflow-wrap:anywhere;}
+.tile .sub{font-size:11.5px; color:#b3a996; line-height:1.4; min-height:16px;}
+.tile .dot{position:absolute; top:10px; right:10px; width:10px; height:10px; border-radius:99px;
+  background:#e6a53a; box-shadow:0 0 0 3px #fff;}
+.tile .dot.bad{background:var(--bad);}
+/* 骨架（載入中） */
+.tile.sk{pointer-events:none;}
+.tile.sk .em,.tile.sk .nm,.tile.sk .sub{background:#efe9dd; color:transparent; border-radius:8px;}
+.tile.sk .em{width:34px; height:34px;} .tile.sk .nm{width:58px; height:15px;} .tile.sk .sub{width:44px; height:11px;}
+@keyframes sk{0%,100%{opacity:.55} 50%{opacity:1}}
+.tile.sk{animation:sk 1.1s ease-in-out infinite;}
+
+.lc-foot{text-align:center; color:#b3a996; font-size:11.5px; line-height:1.9; padding:20px 8px 0;}
+/* 44px：手指點得到的最小尺寸。inline-flex 才會真的長高（純 inline 的 min-height 沒有作用） */
+.lc-foot button{display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 12px;
+  color:#8f8578; font-size:12.5px; font-weight:700; text-decoration:underline;}
+.a2hs{display:flex; align-items:center; gap:10px; margin-top:18px; background:#fff; border:1px dashed #d8cfbf;
+  border-radius:16px; padding:11px 13px;}
+.a2hs p{flex:1; font-size:12.5px; color:#6b6154; line-height:1.6;}
+.a2hs button{min-width:40px; min-height:40px; color:var(--muted); font-size:16px;}
+.offline{display:flex; align-items:center; gap:9px; border-radius:14px; padding:10px 13px; margin-bottom:13px;
+  background:#f1ece2; border:1px solid var(--line); font-size:12.5px; color:#6b6154; line-height:1.55;}
+.emptybox{text-align:center; color:var(--muted); padding:40px 16px;}
+.emptybox .big{font-size:42px;}
+.emptybox p{font-size:13.5px; margin-top:10px; line-height:1.8;}
+.emptybox .go{display:inline-flex; align-items:center; min-height:48px; padding:0 22px; margin-top:14px;
+  border-radius:15px; background:var(--acc); color:#fff; font-size:15.5px; font-weight:800;}
+
+/* =============================================================
+   2. 解鎖（現有公版的簡化替身，只是為了走得到後台）
+   ============================================================= */
+.lk{max-width:420px; margin:0 auto; padding-top:26px;}
+.lk-head{text-align:center; margin-bottom:20px;}
+.lk-head .big{font-size:44px;}
+.lk-head h1{font-size:22px; font-weight:800; margin-top:8px;}
+.lk-head p{font-size:13px; color:var(--muted); margin-top:7px; line-height:1.7;}
+.lk-card{background:var(--card); border-radius:20px; box-shadow:var(--shadow); padding:18px;}
+.who{display:flex; gap:9px; margin-bottom:14px;}
+.who button{flex:1; min-height:74px; border-radius:16px; border:1.5px solid var(--line); background:#fbfaf6;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; font-size:14.5px; font-weight:700;}
+.who button .e{font-size:24px;}
+.who button.on{border-color:var(--acc); background:#fff6f4;}
+.lk-note{font-size:12px; color:var(--muted); line-height:1.7; margin-top:12px; text-align:center;}
+
+/* =============================================================
+   3. 後台（App／成員／近況）
+   ============================================================= */
+.ad-head{display:flex; align-items:center; gap:10px; padding:6px 2px 12px;}
+.ad-head h1{font-size:20px; font-weight:800; flex:1;}
+.ad-head button{min-width:44px; min-height:44px; border-radius:12px; background:#ece5d6;
+  font-size:15px; color:#6b6154; display:flex; align-items:center; justify-content:center;}
+.pub-bar{display:flex; align-items:center; gap:10px; border-radius:16px; padding:12px 14px;
+  background:#e8f6ef; border:1px solid #cfe9dd; margin-bottom:14px;}
+.pub-txt{flex:1; min-width:0; font-size:13px; line-height:1.55;}
+.pub-txt b{display:block; font-size:14px; font-weight:800; color:var(--ok);}
+.pub-txt span{display:block; color:var(--muted); font-size:11.5px; margin-top:2px;}
+.ad-tabs{display:flex; background:#ece5d6; border-radius:14px; padding:3px; margin-bottom:16px;}
+.ad-tabs button{flex:1; min-height:46px; border-radius:11px; font-size:15px; font-weight:700; color:var(--muted);}
+.ad-tabs button.on{background:#fff; color:var(--ink); box-shadow:0 1px 4px rgba(0,0,0,.08);}
+.sec-title{font-size:13px; font-weight:800; color:var(--muted); margin:2px 4px 10px;}
+
+.rowcard{background:var(--card); border-radius:18px; box-shadow:var(--shadow); padding:13px 14px; margin-bottom:11px;}
+.rc-top{display:flex; align-items:flex-start; gap:12px;}
+.rc-face{width:48px; height:48px; border-radius:16px; display:flex; align-items:center; justify-content:center;
+  font-size:24px; flex:0 0 auto; background:#f3eee4;}
+.rc-bd{flex:1; min-width:0;}
+.rc-bd b{font-size:16.5px; overflow-wrap:anywhere;}
+.rc-url{display:block; font-size:11.5px; color:#b3a996; margin-top:3px; overflow-wrap:anywhere; line-height:1.5;}
+.rc-url.miss{color:var(--bad); font-weight:700;}
+.chips{display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;}
+.chip{background:#f3eee4; color:#6b6154; font-size:12px; font-weight:700; padding:4px 9px; border-radius:99px;}
+.chip.none{background:#faf4ec; color:#b3a996; font-weight:600;}
+.chip.warn{background:var(--warn-bg); color:var(--warn); border:1px solid var(--warn-line);}
+.chip.bad{background:#fbeeee; color:var(--bad);}
+.chip.ok{background:#e8f6ef; color:#1f7d5b;}
+.rc-more{min-width:44px; min-height:44px; border-radius:12px; background:#f3eee4; color:#6b6154;
+  font-size:17px; font-weight:800; flex:0 0 auto; display:flex; align-items:center; justify-content:center;}
+.rc-open{width:100%; min-height:42px; margin-top:10px; border-radius:12px; background:#f7f3ec;
+  font-size:13px; font-weight:700; color:#6b6154; display:flex; align-items:center; justify-content:center; gap:6px;}
+.rc-log{border-top:1px dashed var(--line); margin-top:10px; padding-top:9px;}
+.rc-log li{font-size:12.5px; color:#6b6154; line-height:1.6; padding:4px 0; display:flex; gap:8px;}
+.rc-log li i{font-style:normal; color:#b3a996; flex:0 0 62px;}
+.addcard{border:2px dashed #d8cfbf; border-radius:18px; min-height:60px; color:var(--muted); font-size:15.5px;
+  font-weight:700; width:100%; display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:18px;}
+
+/* 近況（變更紀錄） */
+.tl{position:relative; padding-left:22px;}
+.tl::before{content:""; position:absolute; left:5px; top:8px; bottom:8px; width:2px; background:var(--line); border-radius:2px;}
+.tl li{position:relative; padding:0 0 16px 0;}
+.tl li::before{content:""; position:absolute; left:-21px; top:6px; width:12px; height:12px; border-radius:99px;
+  background:#fff; border:2.5px solid #d8cfbf;}
+.tl li.me::before{border-color:var(--acc);}
+.tl .w{font-size:12px; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+.tl .w b{font-size:12px; font-weight:800; color:#6b6154;}
+.tl .t{font-size:14.5px; font-weight:700; line-height:1.55; margin-top:3px; overflow-wrap:anywhere;}
+.tl .x{font-size:11.5px; color:#b3a996; margin-top:4px; line-height:1.5;}
+.day{font-size:12px; font-weight:800; color:var(--muted); margin:2px 0 10px;}
+.loadmore{width:100%; min-height:48px; border-radius:14px; background:#f3eee4; color:#6b6154;
+  font-size:14.5px; font-weight:700; margin-top:4px;}
+
+/* sheet */
+#sheet{position:fixed; inset:0; z-index:80; display:none;}
+#sheet.on{display:block;}
+.backdrop{position:absolute; inset:0; background:rgba(30,22,14,.45);}
+.sheet{position:absolute; left:0; right:0; bottom:0; background:#fff; border-radius:22px 22px 0 0;
+  padding:16px 18px calc(20px + env(safe-area-inset-bottom)); max-height:88dvh; overflow-y:auto;
+  box-shadow:0 -8px 40px rgba(40,30,15,.25); animation:up .22s ease;}
+@keyframes up{from{transform:translateY(22px); opacity:0} to{transform:translateY(0); opacity:1}}
+@media (min-width:640px){ .sheet{left:50%; right:auto; bottom:auto; top:50%; transform:translate(-50%,-50%);
+  width:520px; border-radius:20px;} }
+.sheet-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px;}
+.sheet-head h3{font-size:18px; font-weight:800;}
+.sheet-head button{min-width:44px; min-height:44px; font-size:18px; color:var(--muted);
+  display:flex; align-items:center; justify-content:center;}
+.sheet .note{font-size:12.5px; color:var(--muted); line-height:1.7; margin:-4px 0 14px;}
+.field{display:block; margin-bottom:13px;}
+.field .fl{display:block; font-size:13px; font-weight:700; color:var(--muted); margin-bottom:6px;}
+.field input{width:100%; font-size:16px; font-family:inherit; color:var(--ink); padding:13px;
+  border:1.5px solid var(--line); border-radius:13px; background:#fbfaf6;}
+.field input:focus{outline:none; border-color:var(--acc); background:#fff;}
+.kind{display:flex; flex-direction:column; gap:9px; margin-bottom:14px;}
+.kind button{display:flex; align-items:flex-start; gap:12px; text-align:left; padding:13px 14px;
+  border:1.5px solid var(--line); border-radius:15px; background:#fbfaf6;}
+.kind button.on{border-color:var(--acc); background:#fff6f4;}
+.kind .ke{font-size:22px; line-height:1.2;}
+.kind b{display:block; font-size:15px;}
+.kind span{display:block; font-size:12.5px; color:var(--muted); margin-top:3px; line-height:1.6;}
+.sheet-acts{display:flex; gap:9px; margin-top:8px;}
+.sheet-acts button{flex:1; min-height:52px; border-radius:15px; font-size:16px; font-weight:800;}
+.sheet-acts .go{background:var(--acc); color:#fff; box-shadow:0 4px 14px rgba(226,80,63,.28);}
+.sheet-acts .cancel{background:#f3eee4; color:#6b6154;}
+.expbox{background:var(--warn-bg); border:1px solid var(--warn-line); border-radius:14px; padding:12px 14px;
+  font-size:13px; color:var(--warn); line-height:1.7; margin-bottom:13px;}
+.expbox b{display:block; font-size:14.5px; margin-bottom:3px;}
+/* list-style:none 不可省：自己畫了編號圓圈，原生數字會一起冒出來變成「1. ①」 */
+.steps{counter-reset:s; margin-bottom:12px; padding-left:0; list-style:none;}
+.steps li{counter-increment:s; position:relative; padding:7px 0 7px 30px; font-size:13.5px; line-height:1.65; color:#5d554a;}
+.steps li::before{content:counter(s); position:absolute; left:0; top:8px; width:21px; height:21px; border-radius:99px;
+  background:#ece5d6; color:#6b6154; font-size:12px; font-weight:800; display:flex; align-items:center; justify-content:center;}
+
+/* toast */
+#toast{position:fixed; left:50%; top:calc(14px + env(safe-area-inset-top)); transform:translateX(-50%);
+  background:#2b2620; color:#fff; font-size:14px; font-weight:600; padding:12px 18px; border-radius:14px;
+  z-index:95; max-width:calc(100vw - 32px); text-align:center; line-height:1.5; transition:opacity .25s;}
+#toast.hidden{opacity:0; pointer-events:none;}
+
+/* =============================================================
+   demo 控制台 —— 預設收合、選完自動收合，永遠不推擠被看的畫面
+   ============================================================= */
+/* sheet 打開時整個藏起來：主要按鈕都在下緣，這顆蓋住「存起來」就等於測不到（實測蓋到了） */
+#dm{position:fixed; right:12px; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:99;}
+body.sheeting #dm{display:none;}
+#dmbtn{min-height:40px; padding:0 14px; border-radius:99px; background:rgba(43,38,32,.9); color:#fff;
+  font-size:12.5px; font-weight:800; box-shadow:0 4px 16px rgba(0,0,0,.28); display:flex; align-items:center; gap:6px;}
+#dmpanel{display:none; position:absolute; right:0; bottom:48px; width:min(300px, calc(100vw - 24px));
+  background:#fff; border-radius:18px; box-shadow:0 12px 40px rgba(40,30,15,.3); padding:14px; max-height:70dvh; overflow-y:auto;}
+#dmpanel.on{display:block;}
+#dmpanel h4{margin:0 0 4px; font-size:12px; font-weight:800; color:var(--muted);}
+#dmpanel .grp{margin-bottom:12px;}
+#dmpanel .row{display:flex; gap:6px; flex-wrap:wrap;}
+#dmpanel .row button{min-height:38px; padding:0 11px; border-radius:11px; background:#f3eee4; color:#6b6154;
+  font-size:12.5px; font-weight:700;}
+#dmpanel .row button.on{background:var(--acc); color:#fff;}
+#dmpanel .tip{font-size:11px; color:#b3a996; line-height:1.6; margin-top:6px;}
+</style>
+</head>
+<body>
+
+<!-- ===================== 1. 啟動頁 ===================== -->
+<div id="scr-launch" class="scr on"><div class="wrap">
+  <div class="lc-head">
+    <h1>我的 App</h1>
+    <button class="mini" onclick="go('lock')">🔑 管理</button>
+  </div>
+  <div id="lc-body"></div>
+</div></div>
+
+<!-- ===================== 2. 解鎖 ===================== -->
+<div id="scr-lock" class="scr"><div class="wrap"><div class="lk">
+  <div class="lk-head">
+    <div class="big">🔑</div>
+    <h1>鑰匙圈</h1>
+    <p>管理金鑰、成員與變更紀錄<br>啟動頁不用密碼，這裡要</p>
+  </div>
+  <div class="lk-card">
+    <div class="who">
+      <button class="on" onclick="pickWho(this,'黏')"><span class="e">🧔</span>黏</button>
+      <button onclick="pickWho(this,'肚')"><span class="e">👩</span>肚</button>
+    </div>
+    <label class="field"><span class="fl">密碼</span>
+      <input type="password" value="demo" id="pw" autocomplete="off"></label>
+    <div class="sheet-acts"><button class="go" onclick="unlock()">解鎖</button></div>
+    <p class="lk-note">demo 不驗密碼，按了就進去<br>正式版走現有的解鎖公版</p>
+  </div>
+  <p class="lc-foot"><button onclick="go('launch')">← 回啟動頁</button></p>
+</div></div></div>
+
+<!-- ===================== 3. 後台 ===================== -->
+<div id="scr-admin" class="scr"><div class="wrap">
+  <div class="ad-head">
+    <button onclick="go('launch')">←</button>
+    <h1>鑰匙圈</h1>
+    <button onclick="toast('（demo）設定')">⋯</button>
+  </div>
+  <div class="pub-bar">
+    <div class="pub-txt"><b>✓ 已同步</b><span id="pubwhen">存檔就自動發布，不用另外按</span></div>
+  </div>
+  <div class="ad-tabs">
+    <button id="tb-apps" class="on" onclick="tab('apps')">App</button>
+    <button id="tb-users" onclick="tab('users')">成員</button>
+    <button id="tb-log" onclick="tab('log')">近況</button>
+  </div>
+  <div id="ad-body"></div>
+</div></div>
+
+<div id="sheet"><div class="backdrop" onclick="closeSheet()"></div><div class="sheet" id="sheet-in"></div></div>
+<div id="toast" class="hidden"></div>
+
+<!-- ===================== demo 控制台 ===================== -->
+<div id="dm">
+  <div id="dmpanel">
+    <div class="grp"><h4>金鑰情境</h4><div class="row" id="dm-key"></div></div>
+    <div class="grp"><h4>啟動頁狀態</h4><div class="row" id="dm-net"></div></div>
+    <div class="grp"><h4>畫面</h4><div class="row" id="dm-scr"></div>
+      <p class="tip">全部假資料。磚塊點下去是真的會開他的 App。</p></div>
+  </div>
+  <button id="dmbtn" onclick="dmToggle()">⚙︎ demo</button>
+</div>
+
+<script>
+/* ==========================================================
+   假資料
+   ========================================================== */
+var H=3600e3, D=86400e3, NOW=Date.now();
+var APPS=[
+ {id:'travel-book',  name:'旅途手帳', emoji:'🧳', url:'https://xd1104.github.io/travel-book/',
+  repo:'xd1104/travel-book',  keyed:1, exp:+96, pushed:NOW-2*H},
+ {id:'recipe-book',  name:'食譜本',   emoji:'🍳', url:'https://xd1104.github.io/benson-receipe/',
+  repo:'xd1104/benson-receipe',keyed:1, exp:+9,  pushed:NOW-4*D},
+ {id:'movie-library',name:'電影評分', emoji:'📓', url:'https://xd1104.github.io/movie-library/',
+  repo:'xd1104/movie-library', keyed:1, exp:null, pub:1, pushed:NOW-19*H},
+ {id:'trade-log',    name:'交易日誌', emoji:'📦', url:'https://xd1104.github.io/trade-log/',
+  repo:'xd1104/trade-log',     keyed:1, exp:+158, pushed:NOW-31*H},
+ {id:'lose-weight-helper',name:'熱量',emoji:'🥗', url:'https://xd1104.github.io/lose-weight-helper/',
+  repo:'xd1104/lose-weight-helper', keyed:0, pushed:NOW-27*H},
+ {id:'accounting-book',name:'記帳本', emoji:'💰', url:'https://xd1104.github.io/accounting-book/',
+  repo:'xd1104/accounting-book',keyed:0, pushed:NOW-4*D},
+ {id:'brain-boosting-games',name:'拼圖',emoji:'🧩',url:'https://xd1104.github.io/brain-boosting-games/',
+  repo:'xd1104/brain-boosting-games', keyed:0, pushed:NOW-30*D}
+];
+var LOG=[
+ {at:NOW-2*H,    who:'肚', via:'手機', me:0, t:'換了「食譜本」的金鑰'},
+ {at:NOW-26*H,   who:'黏', via:'手機', me:1, t:'讓「肚」也能用 交易日誌'},
+ {at:NOW-2*D,    who:'',  via:'電腦後台', me:0, t:'新增 App「交易日誌」', x:'這次同時改到 3 個其他檔案'},
+ {at:NOW-4*D,    who:'',  via:'電腦後台', me:0, t:'把「電影評分」設成公開模式'},
+ {at:NOW-9*D,    who:'黏', via:'手機', me:1, t:'換了「旅途手帳」的金鑰'},
+ {at:NOW-12*D,   who:'',  via:'電腦後台', me:0, t:'新增成員「肚」'}
+];
+var APPLOG={
+ 'travel-book':[['2 小時前','行程卡改成可以拖曳排序'],['昨天','修好離線時的空白畫面'],['8/24','加了地圖按鈕']],
+ 'recipe-book':[['4 天前','食譜可以標份量'],['8/22','搜尋改成不分大小寫'],['8/20','修好圖片破圖']],
+ 'movie-library':[['19 小時前','開場動畫的白閃修掉'],['8/26','評分星星改大顆'],['8/25','套上動效基調']],
+ 'trade-log':[['昨天','換日翻頁列重做'],['8/26','月曆不再每秒重建'],['8/25','加了日期選單']],
+ 'lose-weight-helper':[['昨天','熱量統計加週檢視']],
+ 'accounting-book':[['4 天前','分類可以自訂顏色']],
+ 'brain-boosting-games':[['30 天前','初版']]
+};
+var S={ scr:'launch', tab:'apps', key:'soon', net:'ok', me:'黏', a2hs:1, sheetOpen:0 };
+
+/* ==========================================================
+   工具
+   ========================================================== */
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function ago(ts){
+  var d=NOW-ts;
+  if(d<90e3) return '剛剛';
+  if(d<H) return Math.round(d/60e3)+' 分鐘前';
+  if(d<22*H) return Math.round(d/H)+' 小時前';
+  if(d<44*H) return '昨天';
+  if(d<8*D) return Math.round(d/D)+' 天前';
+  var x=new Date(ts); return (x.getMonth()+1)+'/'+x.getDate();
+}
+function clock(ts){var x=new Date(ts);return ('0'+x.getHours()).slice(-2)+':'+('0'+x.getMinutes()).slice(-2);}
+function dayLabel(ts){
+  var a=new Date(ts), b=new Date(NOW);
+  var same=a.toDateString()===b.toDateString();
+  if(same) return '今天';
+  if(new Date(NOW-D).toDateString()===a.toDateString()) return '昨天';
+  return (a.getMonth()+1)+' 月 '+a.getDate()+' 日';
+}
+/* 到期狀態：ok / soon(<=30天) / expired / none(不會過期) / unknown / nokey */
+function keyState(a){
+  if(!a.keyed) return {s:'nokey'};
+  if(S.key==='expired' && a.id==='recipe-book') return {s:'expired', d:-2};
+  if(S.key==='ok'   && a.id==='recipe-book') return {s:'ok', d:120};
+  if(S.key==='unknown') return {s:'unknown'};
+  if(a.exp===null) return {s:'none'};
+  return {s:a.exp<=0?'expired':(a.exp<=30?'soon':'ok'), d:a.exp};
+}
+function keyChip(a){
+  var k=keyState(a);
+  if(k.s==='nokey')   return '<span class="chip none">只有連結</span>';
+  if(k.s==='expired') return '<span class="chip bad">金鑰已過期</span>';
+  if(k.s==='soon')    return '<span class="chip warn">金鑰 '+k.d+' 天後過期</span>';
+  if(k.s==='none')    return '<span class="chip ok">金鑰不會過期</span>';
+  if(k.s==='unknown') return '<span class="chip none">還沒檢查過</span>';
+  return '<span class="chip ok">金鑰還有 '+k.d+' 天</span>';
+}
+function toast(m){var t=$('toast'); t.textContent=m; t.classList.remove('hidden');
+  clearTimeout(toast._t); toast._t=setTimeout(function(){t.classList.add('hidden');},1900);}
+
+/* ==========================================================
+   啟動頁
+   ========================================================== */
+function renderLaunch(){
+  var b=$('lc-body');
+  if(S.net==='loading'){
+    var sk=''; for(var i=0;i<6;i++) sk+='<div class="tile sk"><div class="em"></div><div class="nm"></div><div class="sub"></div></div>';
+    b.innerHTML='<div class="tiles">'+sk+'</div>'
+      +'<p class="lc-foot">正在跟 GitHub 對時…</p>'; return;
+  }
+  if(S.net==='empty'){
+    b.innerHTML='<div class="emptybox"><div class="big">📭</div>'
+      +'<p>還沒有登記任何 App。<br>到管理頁登記一個，這裡就會出現。</p>'
+      +'<a class="go" href="javascript:go(\'lock\')">🔑 去登記</a></div>'; return;
+  }
+  var h='';
+  /* 離線：用上次存下來的清單照樣可以點 */
+  if(S.net==='offline'){
+    h+='<div class="offline"><span>📴</span><div>現在連不上網路。這是上次看到的清單，<b>照樣點得開</b>；更新時間先不顯示。</div></div>';
+  }
+  /* 提醒帶：只在真的有事的時候出現 */
+  var bad=APPS.filter(function(a){return keyState(a).s==='expired';});
+  var soon=APPS.filter(function(a){var k=keyState(a); return k.s==='soon' && k.d<=14;});
+  if(bad.length){
+    h+='<div class="alert bad"><span class="ai">🔴</span><div class="ab">'
+      +'<b>'+esc(bad[0].name)+' 的金鑰已經過期</b>'
+      +'<span>它現在存不了東西，而且不會跳錯誤。換一把新的就好。</span></div>'
+      +'<a class="ago" href="javascript:openKey(\''+bad[0].id+'\')">去換</a></div>';
+  }else if(soon.length){
+    var k=keyState(soon[0]);
+    h+='<div class="alert"><span class="ai">🟠</span><div class="ab">'
+      +'<b>'+esc(soon[0].name)+' 的金鑰還有 '+k.d+' 天</b>'
+      +'<span>過期那天它會安靜地存不了東西，先換掉比較省事。</span></div>'
+      +'<a class="ago" href="javascript:openKey(\''+soon[0].id+'\')">去換</a></div>';
+  }
+  /* 磚塊：一律不分「有沒有金鑰」，開 App 的時候他不在乎那件事 */
+  h+='<div class="tiles">';
+  APPS.forEach(function(a){
+    var k=keyState(a), dot='';
+    if(k.s==='expired') dot='<span class="dot bad"></span>';
+    else if(k.s==='soon' && k.d<=14) dot='<span class="dot"></span>';
+    var sub = S.net==='offline' ? '' : (S.net==='nostat' ? '—' : ago(a.pushed));
+    h+='<a class="tile" href="'+a.url+'" target="_blank" rel="noopener">'+dot
+      +'<span class="em">'+a.emoji+'</span>'
+      +'<span class="nm">'+esc(a.name)+'</span>'
+      +'<span class="sub">'+sub+'</span></a>';
+  });
+  h+='</div>';
+  /* 沒事的時候給一行安靜的確認，不做儀表板 */
+  var keyed=APPS.filter(function(a){return a.keyed;}).length;
+  var foot='';
+  if(S.net==='nostat'){
+    foot='更新時間這次沒拿到（GitHub 問太多次了）<br>清單照常，等一下再看';
+  }else if(S.net==='offline'){
+    foot='離線中 · 資料截至 '+clock(NOW-3*H);
+  }else{
+    foot=(bad.length||soon.length? '' : '🔑 '+keyed+' 把金鑰都還有效<br>')+'資料截至 '+clock(NOW);
+  }
+  h+='<p class="lc-foot">'+foot+' · <button onclick="reloadStat()">重新整理</button></p>';
+  if(S.a2hs && S.net!=='offline'){
+    h+='<div class="a2hs"><p>把這一頁加到主畫面，以後一按就開，不用密碼。</p>'
+      +'<button onclick="S.a2hs=0;renderLaunch()">✕</button></div>';
+  }
+  b.innerHTML=h;
+}
+function reloadStat(){
+  var old=S.net; S.net='loading'; renderLaunch();
+  setTimeout(function(){ S.net=(old==='loading'?'ok':old); renderLaunch(); toast('已更新'); },800);
+}
+
+/* ==========================================================
+   後台
+   ========================================================== */
+function renderAdmin(){
+  var b=$('ad-body');
+  ['apps','users','log'].forEach(function(t){ $('tb-'+t).className = (S.tab===t?'on':''); });
+  if(S.tab==='apps') b.innerHTML=viewApps();
+  else if(S.tab==='users') b.innerHTML=viewUsers();
+  else b.innerHTML=viewLog();
+}
+function viewApps(){
+  var h='<p class="sec-title">共 '+APPS.length+' 個。點卡片看它最近改了什麼。</p>';
+  APPS.forEach(function(a){
+    var noUrl=!a.url;
+    h+='<div class="rowcard">'
+      +'<div class="rc-top">'
+      +'<div class="rc-face">'+a.emoji+'</div>'
+      +'<div class="rc-bd"><b>'+esc(a.name)+'</b>'
+      + (noUrl? '<span class="rc-url miss">⚠ 還沒填網址，啟動頁點不開</span>'
+              : '<span class="rc-url">'+esc(a.url.replace(/^https:\/\//,''))+'</span>')
+      +'<div class="chips">'+keyChip(a)
+      +'<span class="chip">更新於 '+ago(a.pushed)+'</span>'
+      +(a.pub?'<span class="chip">公開模式</span>':'')
+      +'</div></div>'
+      +'<button class="rc-more" onclick="openMenu(\''+a.id+'\')">⋯</button>'
+      +'</div>'
+      +'<button class="rc-open" onclick="toggleLog(this,\''+a.id+'\')">最近改了什麼 ▾</button>'
+      +'<div class="rc-log" hidden><ul>'
+      + (APPLOG[a.id]||[]).map(function(r){return '<li><i>'+esc(r[0])+'</i>'+esc(r[1])+'</li>';}).join('')
+      +'</ul></div>'
+      +'</div>';
+  });
+  h+='<button class="addcard" onclick="openAdd()">＋ 登記新的 App</button>';
+  return h;
+}
+function toggleLog(btn,id){
+  var box=btn.nextElementSibling, open=!box.hidden;
+  box.hidden=open; btn.textContent = open? '最近改了什麼 ▾' : '收起 ▴';
+}
+function viewUsers(){
+  var mk=function(e,n,apps){
+    return '<div class="rowcard"><div class="rc-top"><div class="rc-face">'+e+'</div>'
+      +'<div class="rc-bd"><b>'+n+'</b><div class="chips">'
+      + apps.map(function(x){return '<span class="chip">'+x+'</span>';}).join('')
+      +'</div></div><button class="rc-more" onclick="toast(\'（demo）成員選單\')">⋯</button></div></div>';
+  };
+  return '<p class="sec-title">誰能解開哪些 App 的金鑰</p>'
+    + mk('🧔','黏',['🧳 旅途手帳','🍳 食譜本','📦 交易日誌'])
+    + mk('👩','肚',['🧳 旅途手帳','🍳 食譜本','📦 交易日誌'])
+    + '<button class="addcard" onclick="toast(\'（demo）新增成員\')">＋ 新增成員</button>';
+}
+function viewLog(){
+  var h='<p class="sec-title">鑰匙圈被誰改過。存檔就是一筆紀錄，改不掉也刪不掉。</p>';
+  var last='';
+  LOG.forEach(function(e){
+    var d=dayLabel(e.at);
+    if(d!==last){ h+=(last?'</ul>':'')+'<p class="day">'+d+'</p><ul class="tl">'; last=d; }
+    var who = e.who? esc(e.who)+'（'+esc(e.via)+'）' : esc(e.via);
+    h+='<li class="'+(e.me?'me':'')+'">'
+      +'<div class="w"><b>'+who+'</b><span>'+clock(e.at)+'</span></div>'
+      +'<div class="t">'+esc(e.t)+'</div>'
+      + (e.x? '<div class="x">'+esc(e.x)+'</div>' : '')
+      +'</li>';
+  });
+  h+='</ul><button class="loadmore" onclick="toast(\'（demo）再往前 30 筆\')">看更早的</button>';
+  return h;
+}
+
+/* ==========================================================
+   sheet
+   ========================================================== */
+function openSheet(html){ $('sheet-in').innerHTML=html; $('sheet').classList.add('on');
+  document.body.classList.add('sheeting'); S.sheetOpen=1; }
+function closeSheet(){ $('sheet').classList.remove('on');
+  document.body.classList.remove('sheeting'); S.sheetOpen=0; }
+function openMenu(id){
+  var a=APPS.filter(function(x){return x.id===id;})[0];
+  openSheet('<div class="sheet-head"><h3>'+a.emoji+' '+esc(a.name)+'</h3>'
+   +'<button onclick="closeSheet()">✕</button></div>'
+   +'<div class="kind">'
+   +'<button onclick="openKey(\''+id+'\')"><span class="ke">🔑</span><span><b>換金鑰</b>'
+   +'<span>'+(a.keyed?'目前 '+keyChip(a).replace(/<[^>]+>/g,''):'這個 App 還沒有金鑰')+'</span></span></button>'
+   +'<button onclick="toast(\'（demo）改名字／網址／圖示\')"><span class="ke">✏️</span><span><b>編輯</b>'
+   +'<span>名字、圖示、網址、GitHub repo</span></span></button>'
+   +'<button onclick="toast(\'（demo）上移／下移\')"><span class="ke">↕️</span><span><b>調整順序</b>'
+   +'<span>啟動頁磚塊的排法（固定，不會自己跳來跳去）</span></span></button>'
+   +'</div>');
+}
+function openKey(id){
+  var a=APPS.filter(function(x){return x.id===id;})[0], k=keyState(a);
+  go('admin'); S.tab='apps'; renderAdmin();
+  var warn='';
+  if(k.s==='expired') warn='<div class="expbox"><b>這把已經過期了</b>'
+    +'它現在存不了東西，而且不會跳錯誤——App 看起來一切正常，資料就是沒進去。</div>';
+  else if(k.s==='soon') warn='<div class="expbox"><b>還有 '+k.d+' 天</b>'
+    +'到期日是 GitHub 自己回報的，不是我填的。換一把新的之後會重新讀。</div>';
+  openSheet('<div class="sheet-head"><h3>換 '+esc(a.name)+' 的金鑰</h3>'
+   +'<button onclick="closeSheet()">✕</button></div>'
+   + warn
+   +'<ol class="steps">'
+   +'<li>到 GitHub → Settings → Developer settings → Fine-grained tokens</li>'
+   +'<li>只勾 <b>'+esc(a.repo)+'</b> 這一個 repo，權限 Contents: Read and write</li>'
+   +'<li>把產生的那一串貼進來</li></ol>'
+   +'<label class="field"><span class="fl">新的金鑰</span>'
+   +'<input type="password" placeholder="github_pat_…" autocomplete="off"></label>'
+   +'<p class="note">存下去之後會自動去問 GitHub 這把什麼時候到期，不用自己填。'
+   +'問不到（例如是不會過期的舊式金鑰）會照實說「不會過期」，不會裝作沒事。</p>'
+   +'<div class="sheet-acts"><button class="cancel" onclick="closeSheet()">取消</button>'
+   +'<button class="go" onclick="closeSheet();toast(\'（demo）已存並重新讀到期日\')">存起來</button></div>');
+}
+function openAdd(){
+  openSheet('<div class="sheet-head"><h3>登記新的 App</h3><button onclick="closeSheet()">✕</button></div>'
+   +'<p class="note">先決定這個 App 要不要金鑰。選錯之後也改得回來。</p>'
+   +'<div class="kind">'
+   +'<button class="on" onclick="pickKind(this)"><span class="ke">🔗</span><span><b>只放連結</b>'
+   +'<span>只是想在啟動頁按一下就開它。不會出現在解鎖名單裡。</span></span></button>'
+   +'<button onclick="pickKind(this)"><span class="ke">🔑</span><span><b>連結＋金鑰</b>'
+   +'<span>這個 App 要存東西回 GitHub。登記完會直接把貼金鑰的畫面端出來。</span></span></button>'
+   +'</div>'
+   +'<label class="field"><span class="fl">名字</span><input placeholder="例：拼圖"></label>'
+   +'<label class="field"><span class="fl">網址</span><input placeholder="https://xd1104.github.io/…"></label>'
+   +'<p class="note">GitHub repo 留空的話會從網址猜（猜不到就顯示「—」，不會亂猜）。</p>'
+   +'<div class="sheet-acts"><button class="cancel" onclick="closeSheet()">取消</button>'
+   +'<button class="go" onclick="closeSheet();toast(\'（demo）已登記\')">登記</button></div>');
+}
+function pickKind(el){
+  var p=el.parentNode.children; for(var i=0;i<p.length;i++) p[i].className='';
+  el.className='on';
+}
+function pickWho(el,n){
+  var p=el.parentNode.children; for(var i=0;i<p.length;i++) p[i].className='';
+  el.className='on'; S.me=n;
+}
+function unlock(){ go('admin'); toast('歡迎回來，'+S.me); }
+
+/* ==========================================================
+   導覽 ＋ demo 控制台
+   ========================================================== */
+function go(s){
+  S.scr=s; closeSheet();
+  ['launch','lock','admin'].forEach(function(x){ $('scr-'+x).className='scr'+(x===s?' on':''); });
+  if(s==='launch') renderLaunch();
+  if(s==='admin') renderAdmin();
+  window.scrollTo(0,0);
+  syncDm();
+}
+function tab(t){ S.tab=t; renderAdmin(); }
+function dmToggle(){ $('dmpanel').classList.toggle('on'); }
+var DM={
+  key:[['soon','快到期'],['ok','都正常'],['expired','已過期'],['unknown','沒檢查過']],
+  net:[['ok','正常'],['loading','載入中'],['offline','離線'],['nostat','抓不到更新時間'],['empty','一個都沒有']],
+  scr:[['launch','啟動頁'],['lock','解鎖'],['admin','後台']]
+};
+function syncDm(){
+  ['key','net','scr'].forEach(function(g){
+    $('dm-'+g).innerHTML=DM[g].map(function(o){
+      var cur = g==='scr' ? S.scr : S[g];
+      return '<button class="'+(cur===o[0]?'on':'')+'" onclick="dmSet(\''+g+'\',\''+o[0]+'\')">'+o[1]+'</button>';
+    }).join('');
+  });
+}
+function dmSet(g,v){
+  $('dmpanel').classList.remove('on');   /* 選完自動收合，不擋住被看的畫面 */
+  if(g==='scr'){ go(v); return; }
+  S[g]=v;
+  if(g==='net' && S.scr!=='launch') go('launch');
+  if(S.scr==='launch') renderLaunch(); else renderAdmin();
+  syncDm();
+}
+go('launch');
+</script>
+</body>
+</html>
