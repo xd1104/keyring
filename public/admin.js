@@ -579,7 +579,8 @@ function toolCard(t){
     +   '</div>'
     + '</div>'
     + (t.external && !t.stoppable
-        ? '<div class="tk-note">這個是外面開的、又沒有 PID 可以認，只能去原本那個視窗關掉</div>' : '')
+        ? '<div class="tk-note">認不出這是哪個程序（沒有 port 可以查、也對不上 processMatch），'
+          + '只能去原本開它的地方關掉</div>' : '')
     /* 按鈕自己一排：擠在標題右邊的話，兩欄版的標題只剩一百多 px，字會被切掉 */
     + '<div class="tk-foot">'
     +   '<button class="tk-more" onclick="toggleToolLog(\''+t.id+'\')">'

@@ -1058,6 +1058,52 @@ async function findExternalPids(tool) {
   return pids;
 }
 
+/* ---- 這個 port 是誰在聽（netstat -ano） ----
+ * ⚠️ 2026-09-03 Benson 卡住的地方：面板開的工具是 windowsHide，**沒有視窗**。
+ *   後台被硬殺（桌面 App 關窗時 terminate）之後，那些工具就變成孤兒；
+ *   新開的後台只探得到 port 通，processMatch 又對不上（指令列是 "node server.js"，
+ *   認不出是誰），於是畫面寫「去原本那個視窗關掉」——而那個視窗根本不存在。
+ * 所以：認不出 PID 就直接問「誰佔著這個 port」。netstat 一次拿回整張表，
+ * 配 2 秒快取＋同時只跑一支，一次刷新八張卡也只掃一次。 */
+const PORT_CACHE_TTL = 2000;
+let portCache = { ts: 0, map: null };
+let portScanInflight = null;
+
+function scanListeningPorts() {
+  if (portCache.map && Date.now() - portCache.ts < PORT_CACHE_TTL) return Promise.resolve(portCache.map);
+  if (portScanInflight) return portScanInflight;
+  portScanInflight = new Promise((resolve) => {
+    exec('netstat -ano -p TCP', { windowsHide: true, timeout: 8000, maxBuffer: 16 * 1024 * 1024 },
+      (err, stdout) => {
+        portScanInflight = null;
+        if (err) return resolve(portCache.map || new Map());   /* 掃不到就沿用舊的，不要謊報 */
+        const map = new Map();
+        for (const line of String(stdout).split(/\r?\n/)) {
+          const m = line.match(/^\s*TCP\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)\s*$/i);
+          if (!m) continue;
+          /* 狀態字在某些語系會被翻譯，所以「對方位址是 :0」也算 listening */
+          if (!/listen/i.test(m[3]) && !/:0$/.test(m[2])) continue;
+          const lp = m[1].match(/:(\d+)$/);
+          if (!lp) continue;
+          const port = Number(lp[1]);
+          const pid = Number(m[4]);
+          if (!map.has(port)) map.set(port, []);
+          if (map.get(port).indexOf(pid) < 0) map.get(port).push(pid);
+        }
+        portCache = { ts: Date.now(), map };
+        resolve(map);
+      });
+  });
+  return portScanInflight;
+}
+function invalidatePortCache() { portCache.ts = 0; }
+
+async function pidsOnPort(port) {
+  if (!port) return [];
+  const map = await scanListeningPorts();
+  return (map.get(Number(port)) || []).filter((pid) => pid > 0 && pid !== process.pid);
+}
+
 function probePort(port, timeoutMs = 600) {
   return new Promise((resolve) => {
     let settled = false;
@@ -1081,6 +1127,10 @@ async function buildToolStatus(tool) {
   } else if (tool.port) {
     portOpen = await probePort(tool.port);
   }
+
+  /* 認不出 PID 的（只有 port 通）→ 去問 netstat 誰佔著這個 port，才停得掉 */
+  let portPids = [];
+  if (!managed && portOpen && externalPids.length === 0) portPids = await pidsOnPort(tool.port);
 
   let status;              /* running | starting | stopped */
   let external = false;
@@ -1112,9 +1162,10 @@ async function buildToolStatus(tool) {
     url: tool.url || null,
     status, external, managed,
     pending,                 /* 正在重啟的空窗期（畫面要寫「重新啟動中」而不是「沒在跑」） */
-    pid: managed ? st.pid : (externalPids[0] || null),
-    /* processMatch 比對到的有 PID，可以在這裡停；只靠 port 探到的拿不到 PID，停不了 */
-    stoppable: managed || externalPids.length > 0,
+    pid: managed ? st.pid : (externalPids[0] || portPids[0] || null),
+    /* 三條路認 PID：面板自己開的、processMatch 比對到的、佔著那個 port 的。
+     * 三條都認不出來才是真的停不掉（例如沒有 port 又沒設 processMatch 的 Electron）。 */
+    stoppable: managed || externalPids.length > 0 || portPids.length > 0,
     logLines: st.logs.length,
   };
 }
@@ -1211,6 +1262,7 @@ async function handleApi(req, res, url) {
       }
       const r = startTool(tool);
       invalidateProcCache();
+      invalidatePortCache();
       return sendJson(res, r.ok ? 200 : 500, r);
     }
     if (action === 'stop') {
@@ -1226,12 +1278,25 @@ async function handleApi(req, res, url) {
         if (pids.length > 0) {
           for (const pid of pids) killTree(pid);
           invalidateProcCache();
+          invalidatePortCache();
           pushToolLog(st, '停止外部程序（taskkill /pid ' + pids.join('、') + ' /t /f）', '⚙');
           return sendJson(res, 200, { ok: true, pids });
         }
       }
+      /* 最後一招：誰佔著那個 port 就殺誰。面板自己開的工具沒有視窗（windowsHide），
+       * 後台被硬殺之後留下的孤兒只剩這條路認得出來。 */
+      if (tool.port) {
+        const pids = await pidsOnPort(tool.port);
+        if (pids.length > 0) {
+          for (const pid of pids) killTree(pid);
+          invalidateProcCache();
+          invalidatePortCache();
+          pushToolLog(st, '停止佔用 port ' + tool.port + ' 的程序（taskkill /pid ' + pids.join('、') + ' /t /f）', '⚙');
+          return sendJson(res, 200, { ok: true, pids });
+        }
+      }
       return sendJson(res, 200, { ok: false,
-        message: '不是這個面板開的，這裡停不了（去原本開它的視窗關）' });
+        message: '認不出是哪個程序（沒有 port 也對不上 processMatch），這裡停不了' });
     }
     if (action === 'restart') {
       const st = getToolState(id);
@@ -1245,8 +1310,19 @@ async function handleApi(req, res, url) {
         if (!r.ok) st.pendingUntil = 0;   /* 開不起來就別再假裝啟動中 */
       }, RESTART_DELAY_MS);
       invalidateProcCache();
+      invalidatePortCache();
       return sendJson(res, 200, { ok: true, message: '重啟排好了' });
     }
+  }
+
+  /* 桌面 App 關窗時會打這一支。
+   * ⚠️ 一定要留著：用硬殺（Popen.terminate）收掉 server 的話，process.on('exit')
+   *   不會跑，cleanupTools 也就不會跑，面板開過的工具全部變成**沒有視窗的孤兒**
+   *   （2026-09-03 旅途手帳就是這樣卡住的）。走這一支才收得乾淨。 */
+  if (p === '/shutdown' && m === 'POST') {
+    sendJson(res, 200, { ok: true, message: '收工中（面板開的工具一起收）' });
+    setTimeout(() => { cleanupTools(); process.exit(0); }, 200);
+    return;
   }
 
   /* 兩邊都能改：任何寫入之前先跟 GitHub 對一次時間戳，免得蓋掉手機那邊剛改的東西。

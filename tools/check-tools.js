@@ -10,6 +10,8 @@
  *   E 只接受本機連線 ＋ 跨來源 POST 被擋
  *   F 重啟：殺掉到重開之間那 1.2 秒，狀態要說「啟動中」不是「沒在跑」
  *   G 突變：拿掉 F 的空窗標記，F2 必須翻紅
+ *   H 孤兒：只有 port 認得出來的（沒有視窗可以關）也要停得掉
+ *   I 收工：/api/shutdown 要把面板開過的工具一起帶走（孤兒的根因）
  *
  * ⚠️ 全程在 os.tmpdir() 底下的沙箱跑，用**自己造的假工具**（__tmp__faketool.js），
  *    一次都不會去啟動 Benson 真正的那幾支程式，也不碰
@@ -106,6 +108,18 @@ function alive(pid) {
 }
 function toolOf(list, id) { return (list || []).find((t) => t.id === id) || null; }
 
+/* 收沙箱那台 server：一定要走 /api/shutdown。
+ * 直接 ps.kill() 是硬殺，它 spawn 的假工具會活下來變孤兒 ——
+ * 下次跑整套時 B 組就會被自己上一輪的殘骸擋住（「已經有外部程序在跑了」）。 */
+async function stopServer(s, port) {
+  try { await req(port, "POST", "/shutdown"); } catch (e) { }
+  for (let i = 0; i < 30; i++) {
+    if (s.ps.exitCode !== null) return;
+    await sleep(150);
+  }
+  try { s.ps.kill(); } catch (e) { }
+}
+
 /* ================================================================= */
 /* A. 清單：搬過來的 9 筆一個不漏，鑰匙圈自己被拿掉                     */
 /* ================================================================= */
@@ -157,9 +171,11 @@ async function groupsLive() {
   const dir = makeSandbox();
   const PORT = 45400;
   const FAKE_PORT = 45401;
+  const ORPHAN_PORT = 45402;
   const mark = path.basename(dir);              /* 只會出現在 server 自己的指令列裡 */
   const outA = path.join(dir, "__tmp__a.json").replace(/\\/g, "/");
   const outE = path.join(dir, "__tmp__e.json").replace(/\\/g, "/");
+  const outH = path.join(dir, "__tmp__h.json").replace(/\\/g, "/");
 
   writeTools(dir, [
     { id: "fake-a", name: "假工具A", emoji: "🧪", description: "測試用", category: "作品",
@@ -182,6 +198,11 @@ async function groupsLive() {
     { id: "never", name: "不存在", emoji: "🚫", description: "負控組", category: "AI 工具",
       cwd: dir, command: "node -e 0", port: null, url: null, autostart: false,
       processMatch: "__tmp__no_such_process_zzz" },
+    /* 孤兒：processMatch 故意對不上，只有 port 認得出來。
+     * 模擬「面板開了它（windowsHide，沒有視窗）→ 後台被硬殺 → 它活下來」那個狀況。 */
+    { id: "orphan", name: "孤兒工具", emoji: "🧟", description: "只認得出 port", category: "作品",
+      cwd: dir, command: "node -e 0", port: ORPHAN_PORT, url: null, autostart: false,
+      processMatch: "__tmp__no_such_process_zzz" },
     /* 防呆：就算有人把鑰匙圈那筆貼回來，也不准出現在清單裡 */
     { id: "keyring", name: "鑰匙圈", emoji: "🔑", description: "自己", category: "AI 工具",
       cwd: dir, command: "node -e 0", port: null, url: null, autostart: false, processMatch: "keyring" },
@@ -201,7 +222,7 @@ async function groupsLive() {
       head("B  啟動／停止：真的起得來，而且殺的是整棵行程樹");
       let r = await req(PORT, "GET", "/tools");
       check("B1. 清單列得出來，鑰匙圈那筆被濾掉了",
-        r.status === 200 && r.json.tools.length === 5 && !toolOf(r.json.tools, "keyring"),
+        r.status === 200 && r.json.tools.length === 6 && !toolOf(r.json.tools, "keyring"),
         "回了 " + (r.json && r.json.tools ? r.json.tools.length : "?") + " 筆");
       check("B2. 還沒啟動 → 沒在跑", toolOf(r.json.tools, "fake-a").status === "stopped");
 
@@ -285,6 +306,54 @@ async function groupsLive() {
         txt.split("\n").slice(-4).join(" ⏎ "));
       await req(PORT, "POST", "/tools/fake-a/stop");
       await sleep(600);
+    }
+
+    /* ---------------- H. 只認得出 port 的孤兒 ---------------- */
+    /* 2026-09-03：面板開的工具是 windowsHide（沒有視窗）。後台被硬殺之後它們變成孤兒，
+     * processMatch 又對不上（指令列只是 "node server.js"）。以前畫面只能寫
+     * 「去原本那個視窗關掉」——那個視窗不存在，Benson 因此完全找不到怎麼關。 */
+    if (want("H")) {
+      head("H  孤兒：認不出 PID 就問「誰佔著這個 port」，一樣要停得掉");
+      let r = await req(PORT, "GET", "/tools");
+      check("H1. 負控組：還沒人佔那個 port → 沒在跑（證明不是恆綠）",
+        toolOf(r.json.tools, "orphan").status === "stopped");
+
+      const orphanFile = path.join(dir, "__tmp__orphanmark.js");
+      fs.writeFileSync(orphanFile, FAKE_TOOL);
+      const orph = spawn(process.execPath, [orphanFile], {
+        cwd: dir, stdio: "ignore",
+        env: Object.assign({}, process.env, { FAKE_PORT: String(ORPHAN_PORT), FAKE_OUT: outH }),
+      });
+      extras.push(orph);
+      let ids = null;
+      for (let i = 0; i < 40 && !ids; i++) {
+        try { ids = JSON.parse(fs.readFileSync(outH, "utf8")); } catch (e) { await sleep(150); }
+      }
+      check("H2. 負控組：孤兒真的起來了（父＋孫都活著）",
+        !!ids && alive(ids.pid) && alive(ids.kid), ids ? JSON.stringify(ids) : "沒起來");
+
+      let seen = null;
+      for (let i = 0; i < 20; i++) {
+        const q = await req(PORT, "GET", "/tools");
+        const t = toolOf(q.json.tools, "orphan");
+        if (t.status === "running") { seen = t; break; }
+        await sleep(500);
+      }
+      check("H3. ★ 只有 port 認得出來，也判成「運行中（不是這裡開的）」",
+        !!seen && seen.external === true && seen.managed === false, JSON.stringify(seen));
+      check("H4. ★★ 認得出 PID ⇒ 停得掉（以前這裡是 stoppable:false ＋「去原本那個視窗關掉」）",
+        !!seen && seen.stoppable === true && seen.pid > 0,
+        seen ? ("stoppable=" + seen.stoppable + "｜pid=" + seen.pid) : "");
+
+      const rs = await req(PORT, "POST", "/tools/orphan/stop");
+      check("H5. ★ 停止回 ok", rs.status === 200 && rs.json.ok === true, JSON.stringify(rs.json));
+      let dead = false;
+      for (let i = 0; i < 40; i++) {
+        if (ids && !alive(ids.pid) && !alive(ids.kid)) { dead = true; break; }
+        await sleep(200);
+      }
+      check("H6. ★ 孤兒那棵也是整棵死（連孫程序）", dead,
+        ids ? ("父活著=" + alive(ids.pid) + "｜孫活著=" + alive(ids.kid)) : "");
     }
 
     /* ---------------- C. 偵測 ---------------- */
@@ -382,9 +451,45 @@ async function groupsLive() {
       r = await req(PORT, "GET", "/state", { Host: "attacker.example:" + PORT });
       check("E5. \u2605 Host 不是 localhost/127.0.0.1 → 403（擋 DNS rebinding）", r.status === 403);
     }
+
+    /* ---------------- I. 收工要把開過的工具一起帶走 ---------------- */
+    /* 這一組**必須放最後**：它會把沙箱那台 server 關掉。
+     * 孤兒的根因就在這裡——桌面 App 以前用 terminate()（硬殺），process.on('exit') 不會跑，
+     * 所以每重啟一次後台就生一批沒有視窗的孤兒。改走 /api/shutdown 才收得乾淨。 */
+    if (want("I")) {
+      head("I  收工：/api/shutdown 要連它開的工具一起收（孤兒的根因）");
+      /* 先把上一組留下的 pid 檔刪掉，不然會讀到早就死掉的那一組 pid（I1 會誤紅） */
+      try { fs.unlinkSync(outA); } catch (e) { }
+      await req(PORT, "POST", "/tools/fake-a/start");
+      let ids = null;
+      for (let i = 0; i < 40 && !ids; i++) {
+        try { ids = JSON.parse(fs.readFileSync(outA, "utf8")); } catch (e) { await sleep(150); }
+      }
+      check("I1. 負控組：工具真的被面板開起來了（父＋孫都活著）",
+        !!ids && alive(ids.pid) && alive(ids.kid), ids ? JSON.stringify(ids) : "沒起來");
+
+      const rq = await req(PORT, "POST", "/shutdown");
+      check("I2. /api/shutdown 回 ok", rq.status === 200 && rq.json && rq.json.ok === true,
+        JSON.stringify(rq.json));
+
+      let down = false;
+      for (let i = 0; i < 40; i++) {
+        try { await req(PORT, "GET", "/state"); } catch (e) { down = true; break; }
+        await sleep(200);
+      }
+      check("I3. ★ 後台自己真的結束了", down);
+
+      let dead = false;
+      for (let i = 0; i < 40; i++) {
+        if (ids && !alive(ids.pid) && !alive(ids.kid)) { dead = true; break; }
+        await sleep(200);
+      }
+      check("I4. ★★ 它開的工具整棵樹一起被收掉了 —— 不留孤兒", dead,
+        ids ? ("父活著=" + alive(ids.pid) + "｜孫活著=" + alive(ids.kid)) : "");
+    }
   } finally {
     for (const e of extras) { try { spawnSync("taskkill", ["/pid", String(e.pid), "/t", "/f"]); } catch (x) { } }
-    try { s.ps.kill(); } catch (e) { }
+    await stopServer(s, PORT);
     await sleep(400);
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
   }
@@ -450,7 +555,7 @@ async function groupD() {
     await req(PORT, "POST", "/tools/fake-a/stop");
     await sleep(800);
   } finally {
-    try { s.ps.kill(); } catch (e) { }
+    await stopServer(s, PORT);
     await sleep(400);
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
   }
@@ -504,7 +609,7 @@ async function groupG() {
     await req(PORT, "POST", "/tools/fake-a/stop");
     await sleep(600);
   } finally {
-    try { s.ps.kill(); } catch (e) { }
+    await stopServer(s, PORT);
     await sleep(400);
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
   }
@@ -513,7 +618,7 @@ async function groupG() {
 (async function main() {
   console.log("🧰 check-tools.js — 工具分頁的機器驗收（沙箱＋假工具，不碰真的那幾支）");
   if (want("A")) groupA();
-  if (want("B") || want("C") || want("E") || want("F")) await groupsLive();
+  if (want("B") || want("C") || want("E") || want("F") || want("H") || want("I")) await groupsLive();
   if (want("D")) await groupD();
   if (want("G")) await groupG();
   console.log("\n" + "=".repeat(64));

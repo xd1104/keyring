@@ -57,6 +57,41 @@ def alive():
         return False
 
 
+def stop_server(proc):
+    """
+    收掉自己開的伺服器。
+
+    ⚠️ 不可以直接 terminate()。Windows 的 terminate 是 TerminateProcess（硬殺），
+       server.js 的 process.on('exit') 不會跑 ⇒ 它從工具面板開過的那些程式
+       （node／python，全都是 windowsHide、**沒有視窗**）會全部變成孤兒，
+       下次開後台只探得到 port 通、認不出是誰，畫面就會叫你「去原本那個視窗關掉」
+       ——而那個視窗根本不存在。2026-09-03 旅途手帳實際卡住過。
+
+    所以先打 /api/shutdown 讓它自己收乾淨，收不動才退回硬殺。
+    """
+    try:
+        req = urllib.request.Request(URL + "api/shutdown", method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            r.read()
+        log("已請伺服器自己收工（連它開的工具一起收）")
+    except Exception as e:
+        log(f"打 /api/shutdown 失敗（{e}），退回硬殺")
+    try:
+        proc.wait(timeout=8)
+        return
+    except Exception:
+        pass
+    log("伺服器沒有自己結束，改用 terminate")
+    try:
+        proc.terminate()
+        proc.wait(timeout=8)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def node_exe():
     """找 node。PATH 上有就用 PATH 的；沒有再找幾個常見的安裝位置。"""
     from shutil import which
@@ -131,14 +166,7 @@ def main():
     # 關窗＝離開 App。只收自己開的伺服器：本來就在跑的不要動。
     if owns_server and proc is not None:
         log("視窗關閉，收掉伺服器")
-        try:
-            proc.terminate()
-            proc.wait(timeout=8)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        stop_server(proc)
     log("=== 結束 ===")
     return 0
 
