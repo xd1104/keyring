@@ -225,23 +225,79 @@ h1,h2,h3,p,ul{margin:0;} ul{padding:0; list-style:none;}
 .expbox b{display:block; font-size:15px; margin-bottom:3px;}
 
 /* ============================================================
-   🧰 工具分頁（2026-09-01 從 tool-manager 併進來）
+   🧰 工具分頁（2026-09-01 併進來，2026-09-03 重畫）
    class 前綴 tk-（跟近況那條時間軸的 .tl 不同 token，不會互相命中）
-   刻意沿用既有語言：暖米白底、rowcard／chip／rc-acts 全部重用，
-   這一段只補「狀態燈」「開啟連結」「輸出視窗」三個新東西。
+
+   重畫的兩個原則：
+   ① 這一頁只有一件事要看——「它現在到底有沒有在跑」。所以狀態不是一顆灰chip，
+      而是整張卡片的顏色：左邊色條、圖示底色、狀態那一行，三個地方一起講同一件事。
+   ② 按鈕不再四顆長一樣。每個狀態只有一顆主鈕（能按的那顆），其餘降成淡的；
+      按不了的（沒在跑的時候的「停止」）直接不畫——一排反灰的死按鈕只會讓人以為壞了。
    ============================================================ */
-.tk-bar{display:flex; align-items:center; gap:10px; margin:0 4px 10px; font-size:12.5px; color:var(--muted);}
+.tk-bar{display:flex; align-items:center; gap:10px; margin:0 4px 12px; font-size:12.5px; color:var(--muted);}
 .tk-bar span{flex:1;}
 .tk-bar button{min-height:40px; padding:0 14px; border-radius:11px; background:#f3eee4;
   font-size:13.5px; font-weight:700; color:#6b6154;}
+
+/* 桌面兩欄：一台電腦上十來個工具，一欄排下去要捲很久 */
+.tk-grid{display:grid; grid-template-columns:1fr; gap:12px; margin-bottom:22px;}
+@media (min-width:820px){ .tk-grid{grid-template-columns:1fr 1fr;} }
+
+.tk-card{position:relative; background:var(--card); border-radius:18px; box-shadow:var(--shadow);
+  padding:14px 16px 12px 19px; overflow:hidden;}
+.tk-card::before{content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:#ddd4c4;}
+.tk-card.is-running::before{background:var(--ok);}
+.tk-card.is-starting::before{background:#e0a32c;}
+.tk-head{display:flex; align-items:flex-start; gap:12px;}
+.tk-face{width:42px; height:42px; border-radius:14px; flex:0 0 auto; font-size:22px;
+  display:flex; align-items:center; justify-content:center; background:#f1ece1; filter:grayscale(.55) opacity(.75);}
+.tk-card.is-running .tk-face{background:#e4f4ec; filter:none;}
+.tk-card.is-starting .tk-face{background:#fdf1d9; filter:none;}
+.tk-bd{flex:1; min-width:0;}
+.tk-bd b{font-size:16px; display:block; line-height:1.35;}
+.tk-desc{display:block; font-size:12px; color:#a89e8e; line-height:1.5; margin-top:2px;
+  overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
+.tk-state{display:flex; align-items:center; flex-wrap:wrap; gap:0 8px; margin-top:7px;
+  font-size:13px; font-weight:700; color:#b3a996;}
+.tk-card.is-running .tk-state{color:#1f7d5b;}
+.tk-card.is-starting .tk-state{color:#8a5b12;}
+.tk-state em{font-style:normal; font-weight:600; font-size:11.5px; color:#b9b0a0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
 .tk-dot{display:inline-block; width:8px; height:8px; border-radius:99px; margin-right:6px;
-  vertical-align:1px; background:#c8bfae;}
-.tk-dot.running{background:#2fa87a;}
-.tk-dot.starting{background:#e0a32c;}
+  vertical-align:1px; background:#c8bfae; flex:0 0 auto;}
+.tk-dot.running{background:var(--ok); box-shadow:0 0 0 3px rgba(47,168,122,.16);}
+.tk-dot.starting{background:#e0a32c; animation:tkPulse 1s ease-in-out infinite;}
 .tk-dot.stopped{background:#c8bfae;}
-.tk-go{display:inline-flex; align-items:center; min-height:44px; padding:0 14px; border-radius:12px;
-  background:#f3eee4; font-size:14px; font-weight:700; color:#6b6154; text-decoration:none;}
-.tk-go.off{opacity:.45;}
+@keyframes tkPulse{50%{opacity:.25;}}
+
+/* 主鈕（啟動／開啟）＝實心；次要（重啟／停止）＝淡底 */
+.tk-foot{display:flex; align-items:center; gap:10px; margin-top:11px;}
+.tk-acts{display:flex; gap:7px; flex-wrap:wrap; justify-content:flex-end; margin-left:auto;}
+.tk-btn{display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:38px;
+  padding:0 13px; border-radius:12px; background:#f3eee4; color:#6b6154;
+  font-size:13.5px; font-weight:700; text-decoration:none; white-space:nowrap;
+  transition:background .15s, transform .06s;}
+.tk-btn:hover:not([disabled]){background:#e9e1d2;}
+.tk-btn:active:not([disabled]){transform:translateY(1px);}
+.tk-btn.go{background:var(--acc); color:#fff; box-shadow:0 3px 10px rgba(226,80,63,.24);}
+.tk-btn.go:hover:not([disabled]){background:var(--acc-deep);}
+.tk-btn.bad{background:#fbeeee; color:var(--bad);}
+.tk-btn.bad:hover:not([disabled]){background:#f7e2e2;}
+.tk-btn[disabled]{opacity:.5; cursor:default; box-shadow:none;}
+.tk-spin{width:12px; height:12px; border-radius:99px; border:2px solid rgba(255,255,255,.45);
+  border-top-color:#fff; display:inline-block; animation:tkSpin .7s linear infinite;}
+@keyframes tkSpin{to{transform:rotate(360deg);}}
+
+.tk-note{margin-top:9px; font-size:12.5px; line-height:1.6; color:#8a5b12;
+  background:var(--warn-bg); border:1px solid var(--warn-line); border-radius:12px; padding:7px 10px;}
+
+/* 輸出只是「偶爾要看一眼」的東西，收成一行淡字，不要每張卡都掛一條大橫槓 */
+.tk-more{min-height:32px; padding:0 8px; border-radius:9px; flex:0 0 auto;
+  font-size:12.5px; font-weight:700; color:#b3a996;}
+.tk-more:hover{color:#6b6154; background:#f7f3ec;}
+.tk-card.open .tk-more{color:#6b6154;}
+.tk-log{margin-top:6px;}
+.tk-log p{font-size:13px; color:#b3a996; line-height:1.6;}
 .tk-log pre{margin:0; max-height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere;
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.65;
   color:#6b6154; background:#faf6ee; border:1px solid var(--line); border-radius:12px; padding:10px 12px;}

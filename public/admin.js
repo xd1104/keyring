@@ -497,8 +497,12 @@ function loadTools(){
  * 追完就停：不做常駐輪詢，免得整片畫面在他按按鈕的時候被重建。 */
 function scheduleToolChase(){
   stopToolChase();
+  if(adTab!=="tools"){ TOOLS.chase=0; return; }
+  /* 還在啟動中就把追蹤次數補滿——重啟的空窗期第一次回來可能還沒變成 starting，
+   * 以前寫成「不是 starting 就不追」，按了重啟之後畫面就停在那不動了。 */
   var starting = (TOOLS.list||[]).some(function(t){ return t.status==="starting"; });
-  if(!starting || TOOLS.chase<=0 || adTab!=="tools") { TOOLS.chase=0; return; }
+  if(starting && TOOLS.chase<4) TOOLS.chase = 4;
+  if(TOOLS.chase<=0) return;
   TOOLS.chase--;
   TOOLS.timer = setTimeout(function(){ TOOLS.timer=null; loadTools(); }, 2500);
 }
@@ -531,41 +535,58 @@ function loadToolLog(id){
     TOOLS.logs[id]=d.logs||[]; render();
   }).catch(function(){ TOOLS.logs[id]=[]; render(); });
 }
-function toolStatusHtml(t){
-  if(t.status==="starting") return '<span class="chip warn"><i class="tk-dot starting"></i>啟動中…</span>';
-  if(t.status==="running"){
-    return '<span class="chip ok"><i class="tk-dot running"></i>運行中</span>'
-      + (t.external ? '<span class="chip warn">不是這裡開的</span>' : '');
-  }
-  return '<span class="chip none"><i class="tk-dot stopped"></i>沒在跑</span>';
+/* 2026-09-03 重畫：狀態是這一頁唯一重要的東西，所以狀態變成卡片的顏色本身
+ * （左側色條＋圖示底色＋一行狀態字），不是躲在一排灰chip裡的其中一顆。
+ * 按鈕也不再四顆長一樣：每個狀態只留「現在真的能按的那一顆」當主鈕，
+ * 其餘降成淡的次要鈕；不能按的直接不畫，不留一排死按鈕在那裡誤導人。 */
+function toolStatusWord(t){
+  if(t.status==="starting") return t.pending ? "重新啟動中…" : "啟動中…";
+  if(t.status==="running")  return t.external ? "運行中（不是這裡開的）" : "運行中";
+  return "沒在跑";
 }
 function toolCard(t){
   var busyNow = !!TOOLS.busy[t.id];
   var running = t.status!=="stopped";
   var open = !!TOOLS.openLog[t.id];
   var lines = TOOLS.logs[t.id];
-  var dis = function(cond){ return cond ? ' disabled' : ''; };
-  return '<div class="rowcard stack"><div class="rc-top">'
-    + '<div class="rc-face" style="background:'+grad("sand")+'">'+esc(t.emoji)+'</div>'
-    + '<div class="rc-bd"><b>'+esc(t.name)+'</b>'
-    +   '<span class="rc-url">'+esc(t.description||"")+'</span>'
-    +   '<div class="chips">'+toolStatusHtml(t)
-    +     (t.port ? '<span class="chip">port '+esc(String(t.port))+'</span>' : '')
-    +     (t.pid ? '<span class="chip">pid '+esc(String(t.pid))+'</span>' : '')
+  var acts = [];
+  var B = function(cls,label,action,off,tip){
+    return '<button class="tk-btn '+cls+'"'+(off?' disabled':'')
+      + (tip?' title="'+esc(tip)+'"':'')
+      + ' onclick="toolAct(\''+t.id+'\',\''+action+'\',this)">'+label+'</button>';
+  };
+  if(t.status==="stopped"){
+    acts.push(B("go","▶ 啟動","start",busyNow));
+  } else if(t.status==="starting"){
+    acts.push('<button class="tk-btn go" disabled><i class="tk-spin"></i>啟動中</button>');
+  } else {
+    if(t.url) acts.push('<a class="tk-btn go" href="'+esc(t.url)+'" target="_blank" rel="noopener">開啟 ↗</a>');
+    if(t.managed) acts.push(B("","↻ 重啟","restart",busyNow));
+    if(t.stoppable) acts.push(B("bad","■ 停止","stop",busyNow));
+  }
+  return '<div class="tk-card is-'+t.status+(open?" open":"")+'">'
+    + '<div class="tk-head">'
+    +   '<div class="tk-face">'+esc(t.emoji)+'</div>'
+    +   '<div class="tk-bd">'
+    +     '<b>'+esc(t.name)+'</b>'
+    +     '<span class="tk-desc">'+esc(t.description||"")+'</span>'
+    +     '<span class="tk-state"><i class="tk-dot '+t.status+'"></i>'+esc(toolStatusWord(t))
+    +       (t.port||t.pid ? '<em>'
+    +          (t.port ? "port "+esc(String(t.port)) : "")
+    +          (t.port&&t.pid ? " · " : "")
+    +          (t.pid ? "pid "+esc(String(t.pid)) : "") + '</em>' : '')
+    +     '</span>'
     +   '</div>'
-    +   (t.external && !t.stoppable
-          ? '<div class="keyline">這個是外面開的、又沒有 PID 可以認，只能去原本那個視窗關掉</div>' : '')
     + '</div>'
-    + '<div class="rc-acts">'
-    +   '<button onclick="toolAct(\''+t.id+'\',\'start\',this)"'+dis(busyNow||running)+'>▶ 啟動</button>'
-    +   '<button class="danger" onclick="toolAct(\''+t.id+'\',\'stop\',this)"'+dis(busyNow||!running||!t.stoppable)+'>■ 停止</button>'
-    +   '<button onclick="toolAct(\''+t.id+'\',\'restart\',this)"'+dis(busyNow||!t.managed)+'>↻ 重啟</button>'
-    +   (t.url && running
-          ? '<a class="tk-go" href="'+esc(t.url)+'" target="_blank" rel="noopener">開啟 ↗</a>'
-          : (t.url ? '<span class="tk-go off" title="要先啟動才打得開">開啟 ↗</span>' : ''))
-    + '</div></div>'
-    + '<button class="rc-open" onclick="toggleToolLog(\''+t.id+'\')">'+(open?"收起 ▴":"看它印了什麼 ▾")+'</button>'
-    + (open ? '<div class="rc-log tk-log">'+(lines
+    + (t.external && !t.stoppable
+        ? '<div class="tk-note">這個是外面開的、又沒有 PID 可以認，只能去原本那個視窗關掉</div>' : '')
+    /* 按鈕自己一排：擠在標題右邊的話，兩欄版的標題只剩一百多 px，字會被切掉 */
+    + '<div class="tk-foot">'
+    +   '<button class="tk-more" onclick="toggleToolLog(\''+t.id+'\')">'
+    +     (open?"收起輸出 ▴":"看它印了什麼 ▾")+'</button>'
+    +   '<div class="tk-acts">'+acts.join("")+'</div>'
+    + '</div>'
+    + (open ? '<div class="tk-log">'+(lines
         ? (lines.length ? '<pre>'+esc(lines.join("\n"))+'</pre>'
                         : '<p>還沒有東西。只有從這裡啟動的工具才會留下輸出。</p>')
         : '<p>讀取中…</p>')+'</div>' : '')
@@ -603,7 +624,7 @@ function adTools(){
   var body = cats.map(function(c){
     var mine = TOOLS.list.filter(function(t){ return (t.category||"其他")===c; });
     return '<div class="sec-title">'+esc(c)+'（'+mine.length+'）</div>'
-      + mine.map(toolCard).join("");
+      + '<div class="tk-grid">' + mine.map(toolCard).join("") + '</div>';
   }).join("");
   var upd = TOOLS.at ? "狀態是 "+clockOf(new Date(TOOLS.at).toISOString())+" 抓的" : "";
   return errBar + '<div class="tk-bar"><span>'+esc(upd)+'</span>'

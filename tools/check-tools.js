@@ -8,6 +8,8 @@
  *   C 偵測：「不是我開的但已經在跑」判斷正確；管理器自己與它的子孫要被排除
  *   D 突變：把子樹排除拿掉，C 的斷言必須翻紅（證明 C 是承重的，不是恆綠）
  *   E 只接受本機連線 ＋ 跨來源 POST 被擋
+ *   F 重啟：殺掉到重開之間那 1.2 秒，狀態要說「啟動中」不是「沒在跑」
+ *   G 突變：拿掉 F 的空窗標記，F2 必須翻紅
  *
  * ⚠️ 全程在 os.tmpdir() 底下的沙箱跑，用**自己造的假工具**（__tmp__faketool.js），
  *    一次都不會去啟動 Benson 真正的那幾支程式，也不碰
@@ -241,6 +243,50 @@ async function groupsLive() {
       check("B10. 不存在的工具 → 404 ＋ 人話", r.status === 404 && /找不到/.test((r.json && r.json.message) || ""));
     }
 
+    /* ---------------- F. 重啟的空窗期 ---------------- */
+    /* 2026-09-03 的真實回報：「我按了重啟，他就沒有寫他在啟動中了」。
+     * 重啟＝先殺掉、1.2 秒後再開；那 1.2 秒裡程序真的不在，
+     * 狀態如果照實算就會是「沒在跑」——按鈕看起來像沒反應。 */
+    if (want("F")) {
+      head("F  重啟：中間那 1.2 秒不准說「沒在跑」");
+      let ran = false, pid0 = null;
+      await req(PORT, "POST", "/tools/fake-a/start");
+      for (let i = 0; i < 60; i++) {
+        const q = await req(PORT, "GET", "/tools");
+        const t = toolOf(q.json.tools, "fake-a");
+        if (t.status === "running") { ran = true; pid0 = t.pid; break; }
+        await sleep(200);
+      }
+      check("F1. 前置：先讓它真的跑起來", ran, "pid=" + pid0);
+
+      await req(PORT, "POST", "/tools/fake-a/restart");
+      let r2 = await req(PORT, "GET", "/tools");      /* 立刻問 —— 就是他按完馬上看的那一格 */
+      const gap = toolOf(r2.json.tools, "fake-a");
+      check("F2. ★★ 按完重啟馬上問 → 是「啟動中」而不是「沒在跑」",
+        gap.status === "starting", "status=" + gap.status + "｜pending=" + gap.pending);
+      check("F3. ★ 空窗期會標 pending（畫面才寫得出「重新啟動中」）", gap.pending === true);
+
+      let back = null;
+      for (let i = 0; i < 60; i++) {
+        const q = await req(PORT, "GET", "/tools");
+        const t = toolOf(q.json.tools, "fake-a");
+        if (t.status === "running") { back = t; break; }
+        await sleep(250);
+      }
+      check("F4. ★ 重啟完真的回到「運行中」，而且是新的一顆 pid（不是原本那顆沒死）",
+        !!back && back.pid !== pid0, back ? ("舊 " + pid0 + " → 新 " + back.pid) : "沒回到 running");
+      /* ⚠️ 這裡刻意**不用** alive(舊 pid) 當負控組：Windows 會馬上回收剛釋放的 pid，
+       * 新那棵的子孫很容易撿到同一個號碼，這條會無來由地閃紅（實測三次三種結果）。
+       * 「整棵樹真的死了」由 B8 用假工具自己寫下來的 pid 檔驗；這裡改看 log 的事件順序。 */
+      const lg = await req(PORT, "GET", "/tools/fake-a/logs");
+      const txt = ((lg.json && lg.json.logs) || []).join("\n");
+      check("F5. 負控組：log 裡真的有「殺掉→再開」這兩件事（不是只換了顯示文字）",
+        /taskkill/.test(txt) && /重啟中/.test(txt) && /啟動：/.test(txt),
+        txt.split("\n").slice(-4).join(" ⏎ "));
+      await req(PORT, "POST", "/tools/fake-a/stop");
+      await sleep(600);
+    }
+
     /* ---------------- C. 偵測 ---------------- */
     if (want("C")) {
       head("C  偵測：「不是我開的但已經在跑」＋ 排除面板自己與它的子孫");
@@ -410,11 +456,66 @@ async function groupD() {
   }
 }
 
+/* ================================================================= */
+/* G. 突變：把重啟的空窗標記拿掉，F2 必須翻紅                          */
+/* ================================================================= */
+async function groupG() {
+  head("G  ★ 突變測試：拿掉重啟的空窗標記，F2 必須翻紅");
+  const dir = makeSandbox();
+  const PORT = 45430;
+  const FAKE_PORT = 45431;
+  const outA = path.join(dir, "__tmp__a.json").replace(/\\/g, "/");
+
+  const file = path.join(dir, "server.js");
+  const src = fs.readFileSync(file, "utf8");
+  const TARGET = "st.pendingUntil = Date.now() + RESTART_DELAY_MS + STARTING_GRACE_MS;";
+  if (src.indexOf(TARGET) < 0) {
+    check("G0. 突變目標字串還在（找不到＝這一組等於沒測，不是通過）", false, TARGET);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
+    return;
+  }
+  fs.writeFileSync(file, src.replace(TARGET, "st.pendingUntil = 0;"));
+  check("G0. ★ 突變真的套用了", fs.readFileSync(file, "utf8") !== src);
+
+  writeTools(dir, [
+    { id: "fake-a", name: "假工具A", emoji: "🧪", description: "", category: "作品",
+      cwd: dir, command: "node __tmp__faketool.js", port: FAKE_PORT, url: null, autostart: false,
+      processMatch: "__tmp__faketool", env: { FAKE_PORT: String(FAKE_PORT), FAKE_OUT: outA } },
+  ]);
+  const s = startServer(dir, PORT);
+  try {
+    if (!(await waitUp(PORT))) {
+      check("G1. 突變版起得來", false, s.logs.join("").slice(0, 300));
+      return;
+    }
+    await req(PORT, "POST", "/tools/fake-a/start");
+    let ran = false;
+    for (let i = 0; i < 60; i++) {
+      const q = await req(PORT, "GET", "/tools");
+      if (toolOf(q.json.tools, "fake-a").status === "running") { ran = true; break; }
+      await sleep(200);
+    }
+    check("G1. 前置：突變版也跑得起來", ran);
+    await req(PORT, "POST", "/tools/fake-a/restart");
+    const r = await req(PORT, "GET", "/tools");
+    const t = toolOf(r.json.tools, "fake-a");
+    check("G2. ★ 拿掉空窗標記之後，按完重啟馬上問就變回「沒在跑」（證明 F2 是承重的）",
+      t.status === "stopped", "status=" + t.status);
+    await req(PORT, "POST", "/tools/fake-a/stop");
+    await sleep(600);
+  } finally {
+    try { s.ps.kill(); } catch (e) { }
+    await sleep(400);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { }
+  }
+}
+
 (async function main() {
   console.log("🧰 check-tools.js — 工具分頁的機器驗收（沙箱＋假工具，不碰真的那幾支）");
   if (want("A")) groupA();
-  if (want("B") || want("C") || want("E")) await groupsLive();
+  if (want("B") || want("C") || want("E") || want("F")) await groupsLive();
   if (want("D")) await groupD();
+  if (want("G")) await groupG();
   console.log("\n" + "=".repeat(64));
   if (fail === 0) console.log("✅ 全部 " + pass + " 條通過");
   else console.log("❌ " + fail + " 條沒過（通過 " + pass + " 條）");

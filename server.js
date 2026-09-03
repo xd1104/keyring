@@ -897,11 +897,15 @@ function composeToken(app, b) {
 
 const MAX_LOG_LINES = 500;
 const STARTING_GRACE_MS = 20000;
+/* 重啟＝先殺掉、隔一下再開。這段空窗要讓 taskkill 把 port 放掉。 */
+const RESTART_DELAY_MS = 1200;
 
-/* 每個工具的執行期狀態 { child, pid, startedAt, logs:[] } */
+/* 每個工具的執行期狀態 { child, pid, startedAt, pendingUntil, logs:[] }
+ * pendingUntil：重啟的空窗期。這段時間程序已經死了、新的還沒生出來，
+ * 不記一筆的話狀態會算成「沒在跑」——按了重啟卻顯示沒在跑，看起來像按鈕壞了。 */
 const toolState = new Map();
 function getToolState(id) {
-  if (!toolState.has(id)) toolState.set(id, { child: null, pid: null, startedAt: 0, logs: [] });
+  if (!toolState.has(id)) toolState.set(id, { child: null, pid: null, startedAt: 0, pendingUntil: 0, logs: [] });
   return toolState.get(id);
 }
 
@@ -959,6 +963,7 @@ function startTool(tool) {
   st.child = child;
   st.pid = child.pid;
   st.startedAt = Date.now();
+  st.pendingUntil = 0;          /* 真的開起來了，空窗結束 */
   pushToolLog(st, '啟動：' + tool.command + '（pid ' + child.pid + '）', '⚙');
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
@@ -1079,6 +1084,7 @@ async function buildToolStatus(tool) {
 
   let status;              /* running | starting | stopped */
   let external = false;
+  const pending = st.pendingUntil > Date.now();   /* 重啟的空窗期 */
   if (managed) {
     if (tool.port) {
       /* port 一直沒開也還是 running（程序活著），避免永遠卡在「啟動中」 */
@@ -1086,6 +1092,9 @@ async function buildToolStatus(tool) {
     } else {
       status = 'running';
     }
+  } else if (pending) {
+    /* 舊的殺掉了、新的還沒起來。這裡回 stopped 的話畫面會寫「沒在跑」。 */
+    status = 'starting';
   } else if (portOpen || externalPids.length > 0) {
     status = 'running';
     external = true;       /* 不是這個面板開的（例如他自己雙擊了 start.bat） */
@@ -1102,6 +1111,7 @@ async function buildToolStatus(tool) {
     port: tool.port || null,
     url: tool.url || null,
     status, external, managed,
+    pending,                 /* 正在重啟的空窗期（畫面要寫「重新啟動中」而不是「沒在跑」） */
     pid: managed ? st.pid : (externalPids[0] || null),
     /* processMatch 比對到的有 PID，可以在這裡停；只靠 port 探到的拿不到 PID，停不了 */
     stoppable: managed || externalPids.length > 0,
@@ -1226,7 +1236,14 @@ async function handleApi(req, res, url) {
     if (action === 'restart') {
       const st = getToolState(id);
       if (isManaged(st)) stopTool(tool);
-      setTimeout(() => startTool(tool), 1200);
+      /* 先把空窗記起來再排程：不然中間這 1.2 秒問狀態會答「沒在跑」。
+       * 多給 STARTING_GRACE_MS，讓「起來了但 port 還沒開」也一路顯示啟動中。 */
+      st.pendingUntil = Date.now() + RESTART_DELAY_MS + STARTING_GRACE_MS;
+      pushToolLog(st, '重啟中…', '⚙');
+      setTimeout(() => {
+        const r = startTool(tool);
+        if (!r.ok) st.pendingUntil = 0;   /* 開不起來就別再假裝啟動中 */
+      }, RESTART_DELAY_MS);
       invalidateProcCache();
       return sendJson(res, 200, { ok: true, message: '重啟排好了' });
     }
